@@ -47,6 +47,44 @@ function toEChartsSeries(series: SeriesDto, yAxisIndex: number) {
   return byChartType[series.chartType]
 }
 
+// A sharp, non-gradient color split on the ROI confirmed line at `roiThreshold.value` (FR: spec's
+// "hard color change on threshold crossing"), implemented as ECharts' standard piecewise-visualMap-
+// on-a-line-series feature — it colors each line *segment* by which piece its value falls into, no
+// gradient. `lte`/`gt` so a value exactly on the threshold renders as at/below, per spec Edge
+// Cases. `show: false` hides the piecewise legend widget ECharts draws by default — spec
+// explicitly needs no separate chart legend beyond the tooltip's colored dots.
+//
+// Both pieces get explicit, finite bounds derived from the series' own min/max — found via manual
+// browser verification, not by any test: ECharts 6's line-gradient renderer (`getVisualGradient` /
+// `clipColorStops` in `LineView`) throws `Cannot read properties of undefined (reading 'coord')`
+// when a piece is left open-ended (defaulting to +/-Infinity), even in a minimal reproduction with
+// no other options involved. Bounding both pieces to comfortably cover the actual data range
+// sidesteps the bug while remaining functionally identical (every value is within [min, max] by
+// construction, so nothing can fall outside either piece).
+function buildRoiVisualMap(data: ChartDataResponseDto) {
+  const roiIndex = data.series.findIndex(
+    (series) => series.key === 'roi_confirmed',
+  )
+  if (roiIndex === -1) return undefined
+
+  const roiValues = data.series[roiIndex].values.filter(
+    (value): value is number => value !== null,
+  )
+  const { value, aboveColor, atOrBelowColor } = data.roiThreshold
+  const lowerBound = Math.min(value, ...roiValues) - 1
+  const upperBound = Math.max(value, ...roiValues) + 1
+
+  return {
+    type: 'piecewise',
+    show: false,
+    seriesIndex: roiIndex,
+    pieces: [
+      { gt: lowerBound, lte: value, color: atOrBelowColor },
+      { gt: value, lte: upperBound, color: aboveColor },
+    ],
+  }
+}
+
 // `trigger: 'axis'` calls this with one CallbackDataParams per series at the hovered date, in
 // no guaranteed order — matched back to `series` by `seriesIndex` rather than array position.
 function buildTooltipFormatter(series: SeriesDto[]) {
@@ -95,5 +133,6 @@ export function buildChartOption(data: ChartDataResponseDto): EChartsOption {
       transitionDuration: 0.12,
       formatter: buildTooltipFormatter(data.series),
     },
+    visualMap: buildRoiVisualMap(data),
   } as EChartsOption
 }

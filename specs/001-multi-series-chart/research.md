@@ -411,3 +411,35 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
   split that existed before §13.
 - **`chart/router.py` needed no changes** — it already called `chart_service.get_chart_dataset()`,
   never `loader`/`load_chart_dataset` directly, so the public surface it depends on didn't move.
+
+## 14. ROI confirmed threshold color split (`visualMap`) must use finite piece bounds
+
+- **Decision**: `buildRoiVisualMap()` in `buildChartOption.ts` gives both pieces of the ROI
+  confirmed threshold split explicit, finite bounds — `[min(threshold, ...values) - 1, threshold]`
+  and `[threshold, max(threshold, ...values) + 1]` — instead of the more obviously "correct"
+  open-ended version (`{ lte: threshold }` / `{ gt: threshold }`, relying on ECharts' implicit
+  ±Infinity bounds for the missing side).
+- **Why**: found only via manual browser verification (T037), not by any test. The open-ended
+  version passed T036's unit tests (which only inspect the `EChartsOption` object's shape, never
+  render it) but crashed the real chart: ECharts 6's line-color-gradient renderer
+  (`getVisualGradient`/`clipColorStops` in `echarts/lib/chart/line/LineView.js`) throws
+  `TypeError: Cannot read properties of undefined (reading 'coord')` whenever a piecewise
+  `visualMap` piece targeting a line series is left open-ended, and React's error boundary then
+  renders a blank white page with no other visible signal. Bisected with a minimal in-browser
+  reproduction — via Playwright driving a direct `import()` of the app's own bundled `echarts`
+  module, so real option variants could be tried against the real renderer without a full
+  React/Vite rebuild each time — which ruled out `smooth`, `showSymbol`, `dimension`, and
+  `seriesIndex` as the cause: a bare `{ type: 'line', data: [...] }` series with an open-ended
+  piecewise `visualMap` and nothing else crashes the same way. This looks like a genuine ECharts 6
+  limitation/bug, not a mistake specific to this project's setup.
+- **The fix is behaviorally identical, not a workaround with side effects**: bounding both pieces
+  to the series' own `[min, max]` (with a small margin) can't exclude any real value, since those
+  bounds are derived from the same values — every data point still lands in exactly the piece its
+  actual value implies, so the fix changes nothing about which color a value gets, only avoids the
+  crash.
+- **Lesson for this codebase**: reinforces the same pattern as T026's snake_case/camelCase bug —
+  a unit test asserting the *shape* of a pure function's output (`buildChartOption`'s returned
+  option object) cannot catch a bug that only manifests when a real rendering engine consumes that
+  output. Both bugs were caught only because "start the dev server and use the feature in a real
+  browser before reporting a UI task complete" was followed literally, not treated as optional once
+  the test suite was green.

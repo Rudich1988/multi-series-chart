@@ -403,15 +403,53 @@ consistent color.
 
 ### Implementation for User Story 3
 
-- [ ] T037 [US3] Add a piecewise `visualMap` (bound to the `roi_confirmed` series' `lineStyle`
+- [X] T037 [US3] Add a piecewise `visualMap` (bound to the `roi_confirmed` series' `lineStyle`
       color, `pieces` derived from `roiThreshold.value`/`aboveColor`/`atOrBelowColor`, values at the
       threshold counted as at/below per spec Edge Cases) in `buildChartOption()` in
-      `frontend/src/components/MultiSeriesChart/buildChartOption.ts` (depends on T027)
-- [ ] T038 [P] [US3] Add a second fixture whose `roi_confirmed` values never cross the threshold,
+      `frontend/src/components/MultiSeriesChart/buildChartOption.ts` (depends on T027). Makes
+      T036's test real: `buildRoiVisualMap()` finds `roi_confirmed` by `key` (order-independent),
+      builds a `type: 'piecewise'` `visualMap` with `show: false` and two `lte`/`gt` pieces split
+      exactly at `roiThreshold.value`. **Critical fix found via manual browser verification, not by
+      any test** (same class of bug as T026): the first version left both pieces open-ended
+      (`{ lte: value, color }` / `{ gt: value, color }`, relying on ECharts' implicit
+      ±Infinity bounds) — this passed T036's unit tests (which only inspect the option object, not
+      render it) but crashed the real chart with `Cannot read properties of undefined (reading
+      'coord')` inside ECharts 6's `LineView`/`getVisualGradient`, a React error boundary catching
+      it and rendering a blank white page. Bisected with a minimal in-browser reproduction (via
+      Playwright + a direct `import()` of the app's own `echarts` bundle, isolating `smooth`,
+      `showSymbol`, `dimension`, and `seriesIndex` one at a time) down to: ECharts 6's line-color-
+      gradient renderer throws on *any* open-ended piece, even in an otherwise-minimal option,
+      regardless of those other settings. Fixed by giving both pieces explicit, finite bounds
+      derived from the series' own min/max (`Math.min(value, ...roiValues) - 1` /
+      `Math.max(value, ...roiValues) + 1`) — every value is within that range by construction, so
+      it's behaviorally identical to the open-ended version, just without the crash. T036's tests
+      needed no changes (still assert `lte`/`gt` exactly at `roiThreshold.value`, which the fix
+      preserves) — confirming, like T026, that config-shape unit tests alone can't catch a renderer
+      crash; real browser verification is what caught it.
+- [X] T038 [P] [US3] Add a second fixture whose `roi_confirmed` values never cross the threshold,
       e.g. `backend/chart/tests/fixtures/roi_no_crossing.json`, plus a backend unit test confirming
-      the service can serve it unchanged (depends on T023)
+      the service can serve it unchanged (depends on T023). Fixture: same shape/dates as
+      `sample_dataset.json`, `roi_confirmed` values `[610.78, 180.5, 300.25, 220.5, 357.25]`, all
+      `> 150`. New test in `test_loader.py`,
+      `test_load_chart_dataset_serves_a_non_crossing_roi_dataset_unchanged`: loads the fixture via
+      `chart.loader.load_chart_dataset` directly (same pattern as the file's other tests — there's
+      no way to point the `chart_service` singleton at an arbitrary path, it always reads
+      `config.DATASET_PATH`) and asserts the `roi_confirmed` values pass through byte-for-byte
+      unchanged and are all `> roi_threshold.value` — confirming the backend has no "crossing"
+      special case at all (US3's threshold color split is purely a frontend `visualMap` rendering
+      concern on already-loaded values, per T037).
 
-**Checkpoint**: All 3 chart-behavior user stories (US1–US3) work independently.
+**Checkpoint**: All 3 chart-behavior user stories (US1–US3) work independently. Verified live via
+`docker compose up -d`/`down` + Playwright: with the T037 fix applied, the ROI confirmed spline
+renders as two genuinely flat colors (dark green above the threshold, bright green at/below) with
+a sharp, non-gradient boundary exactly at the dip below 150 — pixel-sampled against
+`specs/reference/frames/frame_21.png` beforehand (via Pillow) to confirm the reference itself uses
+a hard 2-color split, not a gradient (a naive per-pixel color histogram looked gradient-like at
+first, due to anti-aliasing on the thin line's edges; sampling only the most-saturated pixel per
+x-column showed exactly 2 flat colors with sharp boundaries). Also re-verified the T037 fix against
+T038's non-crossing fixture and a dataset with a `null` gap directly in-browser — neither crashes.
+No console errors. Backend: 7/7 pytest passing, `ruff check`/`ruff format --check` clean. Frontend:
+20/20 vitest passing, `oxlint`/`prettier`/`tsc -b` clean.
 
 ---
 
