@@ -38,7 +38,7 @@ TypeScript + Vite + ECharts, `node_modules`-managed), with `docker-compose.yml`,
 - [X] T001 Create the top-level `backend/` and `frontend/` directory skeletons per `plan.md`'s
       Project Structure (empty subdirectories: `backend/{config,project,api/{routers,schemas},domain,services,data,tests/{unit,contract,integration}}`,
       `frontend/src/{config,api,types,components/MultiSeriesChart}`, `frontend/tests/{unit,integration}`)
-- [ ] T002 [P] Initialize the backend Poetry project in `backend/pyproject.toml` with
+- [X] T002 [P] Initialize the backend Poetry project in `backend/pyproject.toml` with
       `django`, `django-ninja`, `pydantic-settings` as dependencies and
       `virtualenvs.in-project = true` (per constitution Principle II)
 - [ ] T003 [P] Scaffold the Django project shell in `backend/project/settings.py`,
