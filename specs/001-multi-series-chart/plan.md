@@ -41,7 +41,10 @@ and halo show/hide must read as near-instantaneous (~100–150ms fade), per SC-0
 Poetry in-project venv only, frontend deps via local `node_modules` only, no global host installs;
 frontend performs no business logic/computation (FR-002, FR-011); single `make up` command starts
 the whole stack (FR-014); ROI threshold and per-series color/type/decimals metadata are
-backend-owned, never hardcoded in the frontend.
+backend-owned, never hardcoded in the frontend; no secret/confidential value (e.g. Django's
+`SECRET_KEY`) is ever hardcoded in source — such values are read by the `Config` class from a
+git-ignored `.env` file (`backend/.env`, documented via a committed `backend/.env.example`), per
+research.md §2.
 
 **Scale/Scope**: 4 fixed named series, one chart page, daily granularity over roughly tens-to-low-
 hundreds of data points (spec Assumptions), no authentication, no multi-tenancy, no live/streaming

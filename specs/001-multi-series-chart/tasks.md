@@ -41,7 +41,7 @@ TypeScript + Vite + ECharts, `node_modules`-managed), with `docker-compose.yml`,
 - [X] T002 [P] Initialize the backend Poetry project in `backend/pyproject.toml` with
       `django`, `django-ninja`, `pydantic-settings` as dependencies and
       `virtualenvs.in-project = true` (per constitution Principle II)
-- [ ] T003 [P] Scaffold the Django project shell in `backend/project/settings.py`,
+- [X] T003 [P] Scaffold the Django project shell in `backend/project/settings.py`,
       `backend/project/urls.py`, `backend/project/asgi.py`, and `backend/manage.py`
       (minimal, unused SQLite `DATABASES` entry per `research.md` §3)
 - [ ] T004 [P] Initialize the frontend Vite + React + TypeScript project in `frontend/package.json`,

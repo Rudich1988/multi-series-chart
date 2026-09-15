@@ -1,1 +1,4 @@
 specs/reference/
+
+.env
+!.env.example

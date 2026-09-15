@@ -27,6 +27,13 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
 - **Alternatives considered**: `django-environ` (rejected — user explicitly asked for a
   `pydantic-settings` `BaseSettings` class); reading `os.environ` directly in Django `settings.py`
   (rejected — violates the stated constraint).
+- **Secrets specifically** (e.g. Django's `SECRET_KEY`): never hardcoded in source. `Config` reads
+  them from a `backend/.env` file (via `pydantic-settings`' `env_file` support, itself backed by
+  `python-dotenv` — an explicit direct dependency). `.env` is git-ignored (root `.gitignore`); a
+  committed `backend/.env.example` documents which variables must be set, with placeholder values.
+  A missing required secret fails loudly at startup (Pydantic validation error naming the missing
+  field) rather than silently falling back to a hardcoded default — verified by removing `.env` and
+  confirming `manage.py check` fails with `secret_key: Field required` instead of booting.
 
 ## 3. Data storage for the 4 datasets
 
