@@ -278,7 +278,30 @@ chart; confirm a loading indicator appears before data arrives.
       Each series gets its own hidden `yAxis` (`scale: true`, so a low-magnitude series like CPA
       isn't flattened against a shared zero-based scale) — satisfies FR-003. `null` values pass
       straight through into ECharts' `data` arrays, which renders them as a gap — satisfies FR-012
-      for free, no extra code needed.
+      for free, no extra code needed. **Revised twice** (research.md §15.1/§15.1.1). First (user
+      report: "синие столбики очень маленькие [на референсе], а у нас — большие") — `scale: true`
+      for the bar-type series specifically was backwards: meant to keep a low-magnitude series like
+      CPA from being *flattened*, but pixel-measuring the reference showed CPA's bars are
+      deliberately tiny/subordinate. Changed bar-type series to a zero-based `yAxis` with
+      `max` = the dataset's global maximum across all 4 series. Second (user report immediately
+      after: bars now "абсолютно плоскими... не видно", the reference "всё же видны и даже
+      отличаются по высоте слегка") — the global-max scale was proportionally far more extreme on
+      this app's actual canvas height than on the reference frame's, putting every CPA value under
+      1px (all rendered the same: flat/invisible). Replaced with `max = (bar's own max) *
+      BAR_HEADROOM` (`BAR_HEADROOM = 6`, own peak reaches ~1/6 of the axis) plus `barMinHeight: 2`
+      as a floor — keeps the bar's own relative variation fully visible while still capping it well
+      below the other 3 series, without depending on (or being thrown off by) any other series'
+      magnitude. Both revisions keyed off `chartType === 'bar'`, not hardcoded to `"cpa"`. **Third
+      revision** (research.md §15.1.2, user: "снова большие... не надо гадать") — `BAR_HEADROOM = 6`
+      was chosen and confirmed by eye, not by measurement; actually measuring the live render found
+      bars at `44-65px` (9-16% of chart height, matching the formula exactly — the math was right,
+      `6` just wasn't small enough) *and* a second, independent bug: `cost`'s semi-transparent area
+      was rendering on top of the 3 middle bars (confirmed by reproducing the exact blended color
+      via the alpha-blend math), turning them into a gray smear instead of a visible blue rectangle.
+      Fixed the layering with `z: 10` on the bar series (default `z` is `2`), and recalibrated to
+      `BAR_HEADROOM = 25` — this time chosen and confirmed against an actual pixel measurement
+      (`10, 12, 18, 11, 10`px, ~2-3.7% of chart height, all pure blue, values' relative variation
+      clearly preserved), not a screenshot judgment call.
 - [X] T028 [US1] Implement `MultiSeriesChart.tsx` in
       `frontend/src/components/MultiSeriesChart/MultiSeriesChart.tsx`: fetches via `chartApi`,
       shows a loading indicator while in flight (FR-013a), shows an error state on failure
@@ -350,7 +373,14 @@ enter/leave, and correct in-bounds positioning near the first/last date.
       array position — the order ECharts calls the formatter with isn't guaranteed to match series
       declaration order). `axisPointer: { type: 'none' }` — the reference
       (`specs/reference/frames/`) has no persistent vertical guide line; only the tooltip + halos
-      communicate the hovered X, so no indicator is drawn.
+      communicate the hovered X, so no indicator is drawn. **Revised** (user report: tooltip rows
+      "не в ряд" — not lined up; research.md §15) — ECharts' default tooltip content is
+      center-aligned, so each row (a different width) ended up individually centered under the
+      widest one instead of forming one flush-left column like the reference. Fixed in
+      `tooltipFormatter.ts` (explicit `text-align: left` on the wrapping div, each row a flex
+      container so the dot and text share one baseline) and here (`tooltip.padding: 14`,
+      `tooltip.textStyle.fontSize: 16`, up from ECharts' defaults of `5`/`~14`, to match the
+      reference's visibly larger tooltip box).
 - [X] T033 [US2] Add per-series `emphasis` halo styling (soft ring in that series' color) for all 4
       series in `buildChartOption()` in the same file (depends on T027). One shared `buildEmphasis
       (color)` helper (`scale: 2.5`, `itemStyle: { color, opacity: 0.35, shadowBlur: 20,

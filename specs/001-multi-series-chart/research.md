@@ -452,3 +452,126 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
   output. Both bugs were caught only because "start the dev server and use the feature in a real
   browser before reporting a UI task complete" was followed literally, not treated as optional once
   the test suite was green.
+
+## 15. Two reference-fidelity bugs found by pixel-measuring the reference frames directly
+
+User report: "на гиф синие столбики очень маленькие, а у нас — большие" (the reference's blue
+(CPA) bars are tiny, ours are huge) and the tooltip's rows "не в ряд" (not lined up) and the box
+"вроде как больше должен быть по масштабу" (seems like it should be bigger). Both were root-caused
+by measuring pixels in `specs/reference/frames/` directly with Pillow, not by eyeballing — visual
+bugs like these are exactly the case Principle IV exists for, and "looks about right" isn't a
+verification method.
+
+### 15.1 CPA (bar-type) y-axis: `scale: true` was backwards for a low-magnitude bar series
+
+- **Measurement**: in `frame_21.png` (no tooltip covering the bars), scanning every column for the
+  bar's blue color and taking the topmost/bottommost matching pixel per bar gave, for all 5 dates
+  (CPA values `0.68, 0.86, 1.23, 0.79, 0.71`): top-of-bar `y` within `388–391` for every single
+  bar, against a measured baseline (`y=391`) shared with every other series (confirmed
+  independently via `Cost`'s and `Conversions`' own zero-based linear fits, see below) — i.e. the
+  bars are 1–3px tall and visually indistinguishable from each other, despite an ~80% relative
+  range in their actual values.
+- **Cross-check**: computed independent zero-based linear px/unit scales for `Cost` (from its
+  area's top edge, 2 points: `~3.99 px/unit`) and `Conversions` (from its point markers, 2 points:
+  `~2.466 px/unit`) and `ROI confirmed` (from its spline, 2 points: `~0.383 px/unit`) — all three
+  fits independently extrapolate back to the same `y=391` baseline at value `0`, confirming each of
+  those 3 series really does get its own independent, zero-based axis (not a single axis shared by
+  all 4 series — a shared axis was ruled out because the 3 px/unit values differ by ~10x, and a
+  shared axis would make them identical). CPA's implied px/unit from its ~1-3px bars
+  (`~0.4-2.4 px/unit` for values `0.68-1.23`) is far closer to `ROI confirmed`'s scale
+  (`~0.383 px/unit`, built from the *dataset's global max*, `610.78`) than to a scale fit to CPA's
+  *own* range (`0.68-1.23`), which would need to be roughly 100x steeper to fill the same pixel
+  height other series reach at their own max.
+- **First decision (superseded, see 15.1.1)**: bar-type series' `yAxis` was made zero-based with
+  `max` = the maximum value across *all* series in the dataset (`globalMaxValue()`), not scaled to
+  the bar series' own range.
+- **Why the original was wrong (T027)**: the original reasoning — "`scale: true` so a low-magnitude
+  series like CPA isn't flattened against a shared zero-based scale" — solved a problem the
+  reference doesn't actually have (a *shared* axis flattening CPA) by introducing the opposite one:
+  with its *own independent* axis tightly fit to `0.68-1.23`, CPA's small absolute differences
+  filled nearly the entire chart height, which is the "giant bars" bug reported.
+
+#### 15.1.1 Revised: `globalMaxValue()` overcorrected to fully flat/invisible bars
+
+- **User report** (immediately after the fix above shipped): "сейчас они стали абсолютно плоскими.
+  их вообще по сути не видно. хотя на gif они все же видны и даже отличаются по высоте слегка" —
+  the bars are now completely flat and essentially invisible, but the reference still shows them as
+  visible with slightly different heights per value.
+- **Why**: `globalMaxValue()` (`610.78`, from `ROI confirmed`) is proportionally far more extreme
+  relative to *this app's* ~484px effective plot height than it is relative to the reference
+  frame's ~300px plot height. Working the actual numbers: `484 * 1.23 / 610.78 ≈ 0.97px` for CPA's
+  largest value — sub-pixel, and every other CPA value is smaller still, so all 5 bars rendered as
+  the same ~0px/invisible instead of the reference's already-tiny-but-present `1-3px` with visible
+  bar-to-bar variation. A literal "match the reference's implied absolute scale" doesn't survive
+  being replayed at a different canvas size — confirms research.md §15.2's earlier point that the
+  GIF's original capture resolution isn't recoverable, extended here to mean an *absolute* pixel
+  target isn't portable either, only a *qualitative* one is ("small and subdued, but visibly
+  varying, never literally flat").
+- **Decision**: replaced the global-max approach with `max = (bar series' own max) * BAR_HEADROOM`
+  (`BAR_HEADROOM = 6`, i.e. the bar's own peak reaches ~1/6 of the axis height), plus
+  `barMinHeight: 2` on the bar series (an ECharts option — a hard floor so no value can round down
+  to literally 0px, independent of the axis math). This keeps the bar's *own* relative variation
+  (min vs. max) fully intact and visible — unlike the flattened `globalMaxValue()` version, where
+  every value collapsed to the same sub-pixel/zero height — while still capping its peak well below
+  what the other 3 series reach, keeping it visually subdued. `BAR_HEADROOM = 6` is a deliberate,
+  documented constant, not a rederivation of the reference's exact (unrecoverable) pixel ratio —
+  the target is the qualitative one above, verified by eye (Playwright screenshot: 5 visibly
+  different-height blue bars, none flat) rather than by a pixel-for-pixel match against
+  `frame_21.png` this time.
+- **Still generalizes to any substituted dataset**: keyed off `chartType === 'bar'` and the bar
+  series' *own* values only — doesn't need or read the other 3 series' magnitudes at all, so it
+  can't be thrown off by, say, a reviewer's dataset where some other series has an unusually large
+  or small range (which `globalMaxValue()` — computed across all 4 series — would have been
+  sensitive to).
+
+#### 15.1.2 `BAR_HEADROOM = 6` was still "verified by eye," not by measurement — and a second bug
+
+- **User pushback**: "ну нет, снова большие... скажи, не надо гадать" — still too big, and an
+  explicit instruction to stop guessing constants and measure instead. Fair: §15.1.1's `6` was
+  picked, then confirmed only by looking at a screenshot and judging it "looks small enough," not
+  by measuring an actual pixel height against a stated target.
+- **What measuring the live render (not the reference this time) actually found**: took a
+  Playwright screenshot with the mouse off-chart, then measured each bar's pure-blue pixel span at
+  its known category-center `x`. With `BAR_HEADROOM = 6` the 5 bars measured `44, 56, ~65+, 51, 46`
+  px tall on a ~483px-tall chart (9–16% of the height) — consistent with the formula
+  (`height = plotHeight * value / (ownMax * 6)`; e.g. `483 * 0.68 / (1.23 * 6) ≈ 44.5px`, matching
+  the measured `44` almost exactly) — the *math* was right, `6` was just still too generous a
+  fraction for "small."
+- **A second, independent bug found in the same screenshot**: the 3 *middle* bars weren't blue at
+  all in the screenshot — they were a dull gray-tan (`199, 200, 186`). Computed the exact alpha
+  blend of `cost`'s area fill color (`#F5E1A4`, default `areaStyle` opacity `0.7`) over the bar's
+  blue (`#5B8DEF`): `0.7*245 + 0.3*91 = 198.8`, `0.7*225 + 0.3*141 = 199.8`, `0.7*164 + 0.3*239 =
+  186.5` — reproduces the measured color almost exactly. So `cost`'s semi-transparent area was
+  being drawn *on top of* the bars (only the leftmost/rightmost bars, where `cost`'s own value
+  happened not to reach down over them, showed true blue) — ECharts doesn't strictly follow series
+  array order for z-stacking across different series types; ordering `cost` before `cpa` in
+  `data.series` didn't guarantee `cpa` renders above it. Fixed with an explicit `z: 10` on the bar
+  series (ECharts default `z` is `2`) — the reference (`frame_21.png` etc.) shows the blue bars as
+  fully opaque, always on top of the yellow area, never blended.
+- **Recalibrated `BAR_HEADROOM` to `25`, verified by measurement this time, not judgment**: same
+  screenshot-and-measure method, now against a stated target (a few percent of chart height,
+  comfortably "small" without being sub-pixel) rather than "looks about right." Result: `10, 12,
+  18, 11, 10` px for values `0.68, 0.86, 1.23, 0.79, 0.71` — 2–3.7% of the ~483px chart height, all
+  pure blue (z-order fix confirmed working), and the values' actual relative variation (`1.23` is
+  ~1.8x `0.68`) is preserved and clearly visible in the measured heights (`18` vs `10`, also ~1.8x).
+  Screenshot-verified afterward for a sanity check, but the pixel measurement — not the screenshot
+  — is what the `25` was chosen and confirmed against.
+
+### 15.2 Tooltip layout: ECharts' default center-aligned content vs. the reference's flush-left column
+
+- **Measurement**: cropped the live tooltip via Playwright (`getBoundingClientRect` on the DOM
+  element containing the date text) and compared side-by-side against a crop of
+  `frame_10.png`'s white tooltip box. The reference's 5 lines (date + 4 rows) all start at the same
+  left `x` — a clean column. The live tooltip's rows were each centered *independently* under the
+  widest row (`"ROI confirmed: 161.47"`), so shorter rows (`"CPA: 1.23"`) appeared indented by a
+  different amount each — a ragged left edge, not a column. Root cause: ECharts' default tooltip
+  content area is `text-align: center`; `tooltipFormatter.ts` never overrode it.
+- **Fix**: `formatTooltip()`'s outer wrapper gets `text-align: left`; each row is a flex container
+  (dot + label + value on one flex line) instead of relying on inline-element default flow, so the
+  dot and text share a consistent baseline regardless of row width.
+- **Box size**: measured the reference tooltip's row-to-row spacing (`~29-30px`, from the dark-text
+  row bands in `frame_10.png`) — visibly larger than what ECharts' defaults produce (`padding: 5`,
+  `~14px` text). Set `tooltip.padding: 14` and `tooltip.textStyle.fontSize: 16` in
+  `buildChartOption()` — not an attempt at a pixel-exact match (the reference GIF's original
+  capture resolution/DPI is unknown, so an exact px figure isn't recoverable), but enough to make
+  the box read as comparably substantial rather than cramped.

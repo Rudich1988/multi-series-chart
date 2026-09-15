@@ -25,6 +25,36 @@ function buildEmphasis(color: string) {
   }
 }
 
+// Bar-type series (CPA) render small but visibly varying — never filling the chart height the way
+// the other 3 series do, but never fully flat either. Found via pixel-measuring
+// specs/reference/frames/frame_21.png: CPA's 5 bars are only ~1-3px tall (out of a ~300px plot)
+// but *do* differ slightly with the value, not identical/flat.
+//   - Fitting the bar's own axis tightly to its own min/max, like `scale: true` gives every other
+//     series, fills nearly the whole chart height with a low-magnitude series like CPA — the
+//     original "giant bars" bug report.
+//   - Zero-basing against the *entire dataset's* max (the first fix) overcorrected the other way:
+//     on this chart's actual pixel height, that scale puts every bar's value under 1px, which
+//     rendered as fully invisible/flat instead of "small but present" — reported after that fix.
+// Landed on: the bar's own max reaches a fixed fraction of the chart height (`1 / BAR_HEADROOM`),
+// so a bar series stays visibly subdued relative to whatever the line/area/spline series' own
+// magnitudes happen to be, while the bar's own relative variation (its min vs. max) is fully
+// preserved and visible. `barMinHeight` (in `toEChartsSeries`) is a floor so a value can't ever
+// round down to literally 0px. Not an exact reference pixel match (research.md §15.2 — the GIF's
+// original capture resolution isn't recoverable) but the qualitative target — small, subdued,
+// still legibly different bar-to-bar — is.
+const BAR_HEADROOM = 25
+
+function buildYAxis(series: SeriesDto) {
+  if (series.chartType === 'bar') {
+    const ownValues = series.values.filter(
+      (value): value is number => value !== null,
+    )
+    const ownMax = Math.max(...ownValues)
+    return { type: 'value', min: 0, max: ownMax * BAR_HEADROOM, show: false }
+  }
+  return { type: 'value', scale: true, show: false }
+}
+
 function toEChartsSeries(series: SeriesDto, yAxisIndex: number) {
   const base = {
     name: series.name,
@@ -39,7 +69,14 @@ function toEChartsSeries(series: SeriesDto, yAxisIndex: number) {
   // their halo — a point that only appears on hover, not permanently on the line.
   const byChartType: Record<ChartType, object> = {
     area: { ...base, type: 'line', areaStyle: {}, showSymbol: false },
-    bar: { ...base, type: 'bar' },
+    // `barMinHeight`: guarantees even the smallest value still renders as a visible sliver,
+    // instead of rounding down to 0px against BAR_HEADROOM's compressed scale. `z: 10` (default
+    // is 2): found via pixel-measuring the live render, not by eye — ECharts was drawing `area`'s
+    // semi-transparent fill *after* (on top of) the bar regardless of `cost` coming first in the
+    // series array, blending the bar into a dull gray smear instead of showing it as a crisp blue
+    // rectangle (confirmed by computing the exact alpha-blend: `cost`'s fill color over the bar's
+    // blue reproduces the measured color almost exactly). A higher `z` forces the bar back on top.
+    bar: { ...base, type: 'bar', barMinHeight: 2, z: 10 },
     spline: { ...base, type: 'line', smooth: true, showSymbol: false },
     line: { ...base, type: 'line', symbol: 'rect', symbolSize: 8 },
   }
@@ -116,11 +153,7 @@ export function buildChartOption(data: ChartDataResponseDto): EChartsOption {
       data: data.dates,
       show: false,
     },
-    yAxis: data.series.map(() => ({
-      type: 'value',
-      scale: true,
-      show: false,
-    })),
+    yAxis: data.series.map(buildYAxis),
     series: data.series.map((series, index) => toEChartsSeries(series, index)),
     tooltip: {
       trigger: 'axis',
@@ -131,6 +164,10 @@ export function buildChartOption(data: ChartDataResponseDto): EChartsOption {
       confine: true,
       // FR-008: ~100-150ms fast fade, vs. ECharts' 400ms default.
       transitionDuration: 0.12,
+      // ECharts' tooltip defaults (padding 5, ~14px text) render noticeably smaller/denser than
+      // the reference's tooltip box (specs/reference/frames/frame_10.png) — scaled up to match.
+      padding: 14,
+      textStyle: { fontSize: 16 },
       formatter: buildTooltipFormatter(data.series),
     },
     visualMap: buildRoiVisualMap(data),
