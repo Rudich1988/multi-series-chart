@@ -322,20 +322,55 @@ enter/leave, and correct in-bounds positioning near the first/last date.
 
 ### Implementation for User Story 2
 
-- [ ] T032 [US2] Add the shared axis-trigger tooltip (`tooltip: { trigger: 'axis' }`, `axisPointer`,
+- [X] T032 [US2] Add the shared axis-trigger tooltip (`tooltip: { trigger: 'axis' }`, `axisPointer`,
       custom formatter producing the date + 4 colored-dot rows, incl. "no data") to
       `buildChartOption()` in `frontend/src/components/MultiSeriesChart/buildChartOption.ts`
-      (depends on T027)
-- [ ] T033 [US2] Add per-series `emphasis` halo styling (soft ring in that series' color) for all 4
-      series in `buildChartOption()` in the same file (depends on T027)
-- [ ] T034 [US2] Configure tooltip fade duration (~100–150ms) and in-bounds
+      (depends on T027). Makes T031's `tooltipFormatter.ts` real: `buildTooltipFormatter()` wraps
+      it, mapping ECharts' `TopLevelFormatterParams` back to `data.series` by `seriesIndex` (not
+      array position — the order ECharts calls the formatter with isn't guaranteed to match series
+      declaration order). `axisPointer: { type: 'none' }` — the reference
+      (`specs/reference/frames/`) has no persistent vertical guide line; only the tooltip + halos
+      communicate the hovered X, so no indicator is drawn.
+- [X] T033 [US2] Add per-series `emphasis` halo styling (soft ring in that series' color) for all 4
+      series in `buildChartOption()` in the same file (depends on T027). One shared `buildEmphasis
+      (color)` helper (`scale: 2.5`, `itemStyle: { color, opacity: 0.35, shadowBlur: 20,
+      shadowColor: color }`) applied uniformly to all 4 series regardless of chart type — ECharts
+      auto-highlights the corresponding data item on every series when `tooltip.trigger: 'axis'`
+      fires, so no manual event wiring was needed in `MultiSeriesChart.tsx`. `area`/`spline` switch
+      from `symbol: 'none'` to `showSymbol: false`, since `'none'` suppresses the emphasis-state
+      symbol too — with `showSymbol: false` the point only appears on hover, matching the
+      reference exactly (permanently-visible markers only on the `line` series, per T027).
+- [X] T034 [US2] Configure tooltip fade duration (~100–150ms) and in-bounds
       repositioning near the axis edges (FR-008, FR-009) in `buildChartOption.ts` /
-      `MultiSeriesChart.tsx` (depends on T032)
-- [ ] T035 [P] [US2] Frontend integration test hovering at multiple X positions (including near the
+      `MultiSeriesChart.tsx` (depends on T032). Both are single `tooltip` option fields, so both
+      landed in `buildChartOption.ts` rather than `MultiSeriesChart.tsx`, keeping all ECharts
+      config in the one pure/testable function: `transitionDuration: 0.12` (120ms fade, vs.
+      ECharts' 400ms default) and `confine: true` (keeps the tooltip inside the chart's bounds,
+      auto-flipping side near the first/last date instead of overflowing).
+- [X] T035 [P] [US2] Frontend integration test hovering at multiple X positions (including near the
       first/last date) asserting one tooltip + 4 halos + in-bounds positioning in
-      `frontend/tests/integration/hoverInteraction.test.tsx`
+      `frontend/tests/integration/hoverInteraction.test.tsx`. **Same scope boundary as T030**: real
+      mouse-driven canvas hover (halo pixels, live tooltip DOM position) isn't exercisable in
+      jsdom without a real ECharts canvas renderer, so `echarts.init` is mocked and the test
+      captures the exact `EChartsOption` passed to `setOption()`, then drives `tooltip.formatter`
+      directly with fabricated axis-trigger params (the same shape ECharts itself passes) — 4
+      tests: all-4-series tooltip content/colors, "no data" for a null value, every series'
+      `emphasis.itemStyle.shadowColor` matches its own color (halo configured for all 4, not just
+      the ones with visible markers), and `confine`/`transitionDuration` are set correctly. Real
+      rendered hover verified manually instead (see checkpoint below).
 
-**Checkpoint**: User Stories 1 and 2 both work independently.
+**Checkpoint**: User Stories 1 and 2 both work independently. Verified live via `make up` (well,
+`docker compose up -d`, then `down`) + Playwright (`/usr/bin/google-chrome`) against
+`quickstart.md` Scenario 2: hovering mid-chart (12.06.2026) produced one tooltip reading exactly
+"12.06.2026 / Cost: 44.36 / CPA: 1.23 / ROI confirmed: 161.47 / Conversions: 36" with correctly
+colored dots — pixel-for-pixel matching `specs/reference/frames/frame_10.png` — plus simultaneous
+halos on all 4 series (translucent yellow glow on the Cost area, blue glow on the CPA bar, green
+ring on the ROI confirmed point, pink ring on the enlarged Conversions marker). Hovering the
+first date (10.06.2026) and last date (14.06.2026) reproduced the exact values from
+`contracts/chart-api.md`'s sample response and kept the tooltip fully inside the chart bounds,
+auto-flipping to the opposite side of the cursor near each edge (FR-009) — no clipping. No console
+errors in any case. Fade duration verified via T035's unit-level assertion on
+`transitionDuration` (not visually, since a screenshot can't show animation speed).
 
 ---
 
