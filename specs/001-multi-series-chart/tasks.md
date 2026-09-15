@@ -165,13 +165,13 @@ chart; confirm a loading indicator appears before data arrives.
 - [X] T021 [P] [US1] Contract test for `GET /chart-data` in
       `backend/chart/tests/contract/test_chart_endpoint.py`, asserting the response shape in
       `contracts/chart-api.md` (dates/series/roi_threshold fields, 4-series invariant, `null`
-      handling for missing values). **Currently red, correctly**: `404` (no router registered yet)
-      — expected to turn green once T024/T025 exist; not a bug in this task.
+      handling for missing values). Was red (`404`, no router registered) until T024/T025; now
+      passes against the real `GET /api/chart-data` response.
 - [X] T022 [P] [US1] Unit test for `chart_service.get_chart_dataset()` in
       `backend/chart/tests/unit/test_chart_service.py`, asserting it returns a valid `ChartDataset`
       (dates ascending/unique, exactly 4 series, values aligned to dates) by loading the real
-      `sample_dataset.json` end-to-end through `chart/loader.py`. **Currently red, correctly**:
-      `ModuleNotFoundError: chart.service` (T023 not built yet).
+      `sample_dataset.json` end-to-end through `chart/loader.py`. Was red
+      (`ModuleNotFoundError: chart.service`) until T023; now passes.
       Added `pytest`/`pytest-django` as dev dependencies and `[tool.pytest.ini_options]`
       (`DJANGO_SETTINGS_MODULE = "project.settings"`) in `pyproject.toml` — no test tooling existed
       before this task.
@@ -184,30 +184,39 @@ chart; confirm a loading indicator appears before data arrives.
 
 ### Implementation for User Story 1
 
-- [ ] T023a [P] [US1] Define `chart/dataset_schema.py` — added per research.md §12: a Pydantic
+- [X] T023a [P] [US1] Define `chart/dataset_schema.py` — added per research.md §12: a Pydantic
       `RawDatasetFile` model validating the raw dataset file's shape (`dates` ascending/unique,
       `series: dict[SeriesKey, list[float | None]]` with exactly the 4 keys and each list's length
       matching `dates`, `roi_threshold.value`) — the one file in `chart/` besides `schemas.py` that
       imports `pydantic`, kept separate from `schemas.py` since it validates a different boundary
-      (the file, not an HTTP request) with a different lifecycle (once at startup, not per request)
-- [ ] T023b [US1] Implement `chart/loader.py`'s `load_chart_dataset(path) -> ChartDataset` — added
+      (the file, not an HTTP request) with a different lifecycle (once at startup, not per request).
+      Built ahead of schedule alongside T017; covered by T022a's tests.
+- [X] T023b [US1] Implement `chart/loader.py`'s `load_chart_dataset(path) -> ChartDataset` — added
       per research.md §12: reads the file, validates via `chart/dataset_schema.py` (raising
       `InvalidDatasetError` on failure, `ChartDataUnavailableError` if the file can't be read),
       merges the validated raw values with `chart/presentation.py`'s `SERIES_METADATA`/
-      `ROI_THRESHOLD_*_COLOR`, builds a `ChartDataset` (depends on T014, T015, T017, T023a)
-- [ ] T023 [US1] Implement `chart_service.get_chart_dataset()` in `backend/chart/service.py` as a
+      `ROI_THRESHOLD_*_COLOR`, builds a `ChartDataset` (depends on T014, T015, T017, T023a). Built
+      ahead of schedule alongside T017; covered by T022a's tests.
+- [X] T023 [US1] Implement `chart_service.get_chart_dataset()` in `backend/chart/service.py` as a
       thin wrapper delegating to `chart/loader.py`'s `load_chart_dataset(config.DATASET_PATH)` —
       `service.py` itself imports no `pydantic`/`ninja` (depends on T023b)
-- [ ] T024 [P] [US1] Define the Pydantic boundary schemas (`ChartDataResponse`, `SeriesSchema`,
+- [X] T024 [P] [US1] Define the Pydantic boundary schemas (`ChartDataResponse`, `SeriesSchema`,
       `ROIThresholdSchema`) in `backend/chart/schemas.py`, plus the dataclass↔schema mapping
-      functions (depends on T014)
-- [ ] T025 [US1] Implement the thin `GET /chart-data` router in `backend/chart/router.py`:
+      functions (depends on T014). The "mapping function" is `ChartDataResponse.from_dataset()`,
+      which delegates to Pydantic v2's `model_validate(..., from_attributes=True)` — recursively
+      reads the nested `ChartDataset`/`SeriesData`/`ROIThresholdConfig` dataclasses' attributes
+      directly, so no hand-written field-by-field copying was needed; verified it reproduces
+      `contracts/chart-api.md`'s example response exactly.
+- [X] T025 [US1] Implement the thin `GET /chart-data` router in `backend/chart/router.py`:
       calls `chart_service.get_chart_dataset()` and returns the mapped schema, no business logic,
-      no `try/except`; registered onto the shared `api` instance from `api/ninja_app.py`. **Also
-      calls `load_chart_dataset` once at module import time** (research.md §12) so a malformed
-      dataset file crashes `make up` immediately with a clear traceback, instead of surfacing as a
-      confusing `500`/`503` on the first browser request
-      (depends on T023, T024, T016)
+      no `try/except`; registered onto the shared `api` instance from `api/ninja_app.py` via
+      `api.add_router("", router)` at module level — `project/urls.py` imports `chart.router` for
+      this side effect, same pattern as `api.exceptions` (T017). **Also calls `load_chart_dataset`
+      once at module import time** (research.md §12) so a malformed dataset file crashes `make up`
+      immediately with a clear traceback, instead of surfacing as a confusing `500`/`503` on the
+      first browser request — verified by deliberately truncating a series' values array and
+      confirming `manage.py check` fails loudly with the exact validation error, not a silent
+      partial boot (depends on T023, T024, T016)
 - [ ] T026 [P] [US1] Implement the frontend API client `fetchChartData()` in
       `frontend/src/api/chartApi.ts`, calling `${config.apiBaseUrl}/chart-data` and typing the
       result as `ChartDataResponseDto` (depends on T018, T019)
