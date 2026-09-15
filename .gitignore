@@ -3,6 +3,14 @@ specs/reference/
 .env
 !.env.example
 
+# Backend (Poetry-managed, in-project venv)
+.venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
 db.sqlite3
+
+# Frontend (npm-managed node_modules, Vite build output)
+node_modules/
+dist/

@@ -43,14 +43,23 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
 - **Alternatives considered**: `django-environ` (rejected — redundant with `python-dotenv`, already
   a dependency); keeping `pydantic-settings` (rejected per user feedback above); reading
   `os.environ` directly in Django `settings.py` (rejected — violates the stated constraint).
-- **Secrets specifically** (e.g. Django's `SECRET_KEY`): never hardcoded in source.
-  `BaseConfig.SECRET_KEY = os.environ["SECRET_KEY"]` — no default, so a missing `.env`/env var
-  raises `KeyError` immediately at import time (fail-fast; the error message is a bare `KeyError`
-  now rather than pydantic's more descriptive "Field required," a minor readability trade-off for
-  dropping the dependency). `.env` is git-ignored (root `.gitignore`); a committed
-  `backend/.env.example` documents which variables must be set, with placeholder values. Verified
-  by removing `.env` and confirming `manage.py check` fails with `KeyError: 'SECRET_KEY'` instead
-  of booting.
+- **Secrets specifically** (e.g. Django's `SECRET_KEY`): never hardcoded as a *real* secret in
+  source, and never committed — `.env` is git-ignored (root `.gitignore`) and was verified never
+  tracked (`git log --all -- backend/.env` is empty) and never baked into the built image
+  (`backend/.dockerignore` excludes it; verified by running the built image and confirming
+  `/app/.env` doesn't exist). **Revised**: `BaseConfig.SECRET_KEY` originally had no default
+  (`os.environ["SECRET_KEY"]`, raising `KeyError` immediately if unset) — per user feedback
+  ("SECRET_KEY сделай тоже опционным... в принципе ничего не должно быть обязательным"), it now
+  has one: `os.environ.get("SECRET_KEY", "django-insecure-dev-placeholder-change-me")`. The
+  `"django-insecure-"` prefix mirrors Django's own `startproject` scaffolding convention for
+  flagging a key that must never be used in production — it's a real, working key for local/demo
+  use, just not a secret one. This makes `.env` fully optional end-to-end: every other `BaseConfig`
+  field already had a default, and `docker-compose.yml`'s `env_file` entry was changed from a bare
+  path (which makes Compose refuse to start at all if the file is missing —
+  verified: `env file .../backend/.env not found`) to `{ path: ./backend/.env, required: false }`.
+  Verified by removing `.env` entirely and running `make up` from that state: the stack boots, the
+  chart renders correctly in a real browser, and `docker compose logs` shows no error — `.env` is
+  now purely an opt-in override mechanism, never a precondition for running the project at all.
 - **`DEBUG` and `ALLOWED_HOSTS`**: `DEBUG` (default `False` — user-requested addition; previously
   Django's scaffold default of `DEBUG = True` was left hardcoded in `project/settings.py` and never
   wired to `Config` at all) and `ALLOWED_HOSTS` (default `["localhost", "127.0.0.1"]`, comma-

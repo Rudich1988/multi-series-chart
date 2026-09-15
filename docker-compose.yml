@@ -2,7 +2,8 @@ services:
   backend:
     build: ./backend
     env_file:
-      - ./backend/.env
+      - path: ./backend/.env
+        required: false
     volumes:
       - ./backend:/app
       - backend_venv:/app/.venv

@@ -470,19 +470,72 @@ validation/exception code required.
 
 ### Implementation for User Story 4
 
-- [ ] T039 [US4] Finalize `docker-compose.yml` environment wiring: the frontend's
+- [X] T039 [US4] Finalize `docker-compose.yml` environment wiring: the frontend's
       `VITE_API_BASE_URL` pointing at the backend service, and the backend's CORS-allowed-origins
-      env var pointing at the frontend service (depends on T007, T013)
-- [ ] T040 [US4] Finalize `Makefile` targets (`up` builds + starts both services; `down` stops them;
-      `logs` tails both) at the repository root (depends on T008)
-- [ ] T041 [P] [US4] Write the root `README.md`: prerequisites, `make up`, and step-by-step
+      env var pointing at the frontend service (depends on T007, T013). **No `docker-compose.yml`
+      change needed** — both sides were already correctly wired since T007/T013: the frontend gets
+      `VITE_API_BASE_URL: http://localhost:8000/api` via an explicit `environment:` block (the
+      browser needs the host-published port, not the `backend` service hostname, since
+      `import.meta.env` is read client-side); the backend's `CORS_ALLOWED_ORIGINS` already
+      defaults to `http://localhost:5173` in `config/settings.py`, matching the frontend's
+      published port, and stays overridable via `.env` (not moved into `docker-compose.yml`
+      `environment:`, which would silently shadow a reviewer's own `.env` override — inconsistent
+      with `.env.example`'s "optional override" promise). Considered adding an explicit
+      `CORS_ALLOWED_ORIGINS` to the backend's compose `environment:` block for symmetry with the
+      frontend, then reverted: it would be redundant with the existing code default and would
+      break that override path for no benefit. Verified working, not just by inspection — every
+      prior checkpoint's successful cross-origin `fetch()` from the browser (port 5173) to the API
+      (port 8000) is only possible if CORS is already correctly configured; a misconfigured origin
+      would have surfaced as a CORS console error in those same Playwright runs, and none did.
+      **Found and fixed a real doc bug while verifying this**: `backend/.env.example` documented
+      `CORS_ALLOWED_ORIGINS=["http://localhost:5173"]` (JSON-array-looking), but
+      `config/settings.py` actually parses it as a comma-separated string
+      (`.split(",")`) — that literal example would have produced a broken origin
+      (`'["http://localhost:5173"]'`, brackets and quotes included) had a reviewer copy-pasted it.
+      Fixed the example to the real comma-separated format and added the previously-undocumented
+      `ALLOWED_HOSTS`/`DEBUG`/`LOG_LEVEL` overrides for completeness.
+- [X] T040 [US4] Finalize `Makefile` targets (`up` builds + starts both services; `down` stops them;
+      `logs` tails both) at the repository root (depends on T008). Already complete since T008
+      (built ahead of schedule) — `up`/`down`/`logs` all re-verified working during T042's
+      checkpoint run, including `make logs` tailing both containers.
+- [X] T041 [P] [US4] Write the root `README.md`: prerequisites, `make up`, and step-by-step
       instructions for substituting the 4 datasets by editing `backend/chart/data/sample_dataset.json`
-      (mirrors `quickstart.md` Scenario 4), per FR-015
-- [ ] T042 [US4] Manually verify `quickstart.md`'s Setup and Scenario 4 end-to-end on a clean clone:
+      (mirrors `quickstart.md` Scenario 4), per FR-015. Covers: prerequisites (Docker + `make`, no
+      local Python/Node), clone → `make up` (no `.env` setup step — see the SECRET_KEY-default note
+      below), the two local URLs, `make down`/`make logs`, dataset substitution steps (mirroring
+      `quickstart.md` Scenario 4 — edit `sample_dataset.json`'s numbers only, colors/types/decimals
+      are fixed in `chart/presentation.py`), how to run each half's test suite, and a short
+      project-layout pointer into `specs/001-multi-series-chart/` for anyone wanting the full
+      design record. **Revised after T042**: originally documented `cp backend/.env.example
+      backend/.env` with a reminder to set `SECRET_KEY`, as a required step — updated once
+      `SECRET_KEY` (and `docker-compose.yml`'s `env_file`) became fully optional (research.md §2),
+      so `.env` is now presented purely as an opt-in override.
+- [X] T042 [US4] Manually verify `quickstart.md`'s Setup and Scenario 4 end-to-end on a clean clone:
       `make up` from scratch, substitute the dataset, confirm the chart reflects it, and confirm no
-      step required a local Python/Node install (depends on T039, T040, T041)
+      step required a local Python/Node install (depends on T039, T040, T041). Simulated "clean
+      clone" by removing both named volumes (`docker compose down -v`, wiping the in-project
+      Poetry venv and `node_modules`) rather than actually re-cloning, since `.env` (real,
+      git-ignored) needed to stay in place — the volumes are what a real fresh clone wouldn't have
+      either. `make up` rebuilt and reinstalled both sides from scratch in ~5s (frontend log:
+      "added 116 packages... in 5s"; backend's Poetry resolved instantly from its own image-layer
+      cache) and the chart rendered correctly (verified via Playwright, 1 canvas, no console
+      errors) — confirms FR-014/SC-004's "single command, no global installs" claim, not just by
+      reading the Dockerfiles. Then substituted `sample_dataset.json` with deliberately different
+      values (descending Cost/CPA, an oscillating ROI confirmed crossing a new threshold on every
+      point, ascending Conversions), ran `make up` again exactly as `quickstart.md` Scenario 4
+      documents, and confirmed via a real hovered tooltip that the values were the new ones
+      end-to-end (`10.06.2026 / Cost: 999.11 / CPA: 9.11 / ROI confirmed: 42.00 / Conversions:
+      111`) with zero code changes — including the US3 threshold color split correctly
+      re-evaluating against the new zigzag data and new threshold. Restored `sample_dataset.json`
+      to its original committed content afterward (`git diff` confirms no residual change) and
+      tore the stack down.
 
 **Checkpoint**: All 4 user stories are independently functional; the project is reviewer-runnable.
+Combined with every prior phase's checkpoint (US1–US3, each independently verified live), the
+project is now fully reviewer-runnable per FR-014/FR-015/SC-004: clone, `make up`, view the chart,
+optionally substitute data and `make up` again — no undocumented step, no local Python/Node
+install, no step that only worked because of leftover local state (re-verified from a volumes-wiped
+clean state in T042, not just "it still works on my already-set-up machine").
 
 ---
 
@@ -490,14 +543,64 @@ validation/exception code required.
 
 **Purpose**: Final checks spanning all stories.
 
-- [ ] T043 [P] Run every scenario in `quickstart.md` end-to-end against the running stack as final
-      validation
-- [ ] T044 [P] Add a root `.gitignore` (`.venv`/Poetry venv artifacts, `node_modules`, `__pycache__`,
-      `dist`, `.env`)
-- [ ] T045 [P] Review `backend/chart/router.py` and `backend/api/` for router thinness, zero
-      `try/except`, and zero stray `os.environ()` usage (constitution Principles II, V)
-- [ ] T046 [P] Review `frontend/src/` for zero business logic (no client-side threshold/format
-      computation — everything sourced from `ChartDataResponseDto`) (constitution Principle II)
+- [X] T043 [P] Run every scenario in `quickstart.md` end-to-end against the running stack as final
+      validation. Fresh `make up`, then in one session: **Setup** — both services reachable
+      (`200`). **Scenario 1** — 1 canvas, all 4 series rendered; `docker compose stop backend` +
+      reload shows exactly "Failed to load chart data." with 0 canvas (FR-013); restarted.
+      **Scenario 2** — hovered mid-chart: single tooltip, all 4 colored rows, correct values;
+      moved off-chart: confirmed via computed `opacity` (not just DOM presence — text alone
+      persists after fade-out since ECharts keeps the tooltip element in the DOM and fades it via
+      CSS `opacity`, which a naive "does this text exist" check would misread as "still showing")
+      that it actually fades to `opacity: 0`; hovered the first and last dates: tooltip stayed
+      fully in-bounds, flipping to the opposite side of the cursor near each edge (FR-009).
+      **Scenario 3** — default (crossing) dataset: confirmed the hard 2-color split is still
+      correct post-T037-fix; edited `roi_confirmed` to `[610.78, 180.50, 300.25, 220.50, 357.25]`
+      (never `<= 150`), `make up` again: spline renders as one consistent dark-green color, no
+      artificial break; reverted to the original values (`git diff` confirms no residual change),
+      `make up` again: split returns correctly. **Scenario 4** — already exhaustively re-verified
+      moments earlier in T042 (substitute → `make up` → confirm end-to-end → restore); not
+      repeated identically here since nothing in T043-T046's scope (`.gitignore`, code-cleanliness
+      review, `SECRET_KEY` default) touches the substitution path at all. Finished with a full
+      re-run of both test suites inside Docker: backend 7/7 pytest + `ruff check`/`ruff format
+      --check` clean, frontend 20/20 vitest + `oxlint`/`prettier --check`/`tsc -b` clean. Stack
+      torn down (`make down`), working tree confirmed clean of residual data-file edits.
+- [X] T044 [P] Add a root `.gitignore` (`.venv`/Poetry venv artifacts, `node_modules`, `__pycache__`,
+      `dist`, `.env`). **Investigated before changing anything**: `backend/.venv`,
+      `backend/.pytest_cache`, and `backend/.ruff_cache` were already invisible to `git status`,
+      but only because each of those tools generates its *own* nested `.gitignore` (`*`) the first
+      time it runs — fragile (depends on that generation happening at all) and not reviewer-legible
+      from the root `.gitignore` alone. `frontend/node_modules`/`dist` were already covered by
+      Vite's scaffolded `frontend/.gitignore` (left as-is — it also covers editor files and logs,
+      not just this task's scope). Added explicit root-level rules for all of it
+      (`.venv/`, `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.ruff_cache/`, `node_modules/`,
+      `dist/`), so the full picture is visible in one place without hunting for nested
+      self-ignoring files. `.env`/`!.env.example` were already present from earlier work — kept
+      as-is. Verified via `git status --short` before/after: no previously-tracked file became
+      newly ignored (this only affects untracked paths).
+- [X] T045 [P] Review `backend/chart/router.py` and `backend/api/` for router thinness, zero
+      `try/except`, and zero stray `os.environ()` usage (constitution Principles II, V). Clean, no
+      changes needed — verified by grep across `backend/`, not just reading the two files in
+      isolation: the only `try/except` in application code is in `chart/loader.py` (converts raw
+      `OSError`/`ValidationError` into `ChartDataUnavailableError`/`InvalidDatasetError` at the
+      file-boundary, exactly where research.md §5's centralized-exception-handling design says it
+      belongs — router.py and service.py have zero); `manage.py`'s `try/except ImportError` is
+      Django's own unmodified scaffold, out of scope. The only `os.environ`/`os.getenv` calls
+      outside `config/settings.py` (the single designated location, research.md §2) are in
+      `manage.py`/`wsgi.py`/`asgi.py`'s mandatory `os.environ.setdefault("DJANGO_SETTINGS_MODULE",
+      ...)` — Django's own required bootstrap, not application config, and not "business logic"
+      reading config ad hoc.
+- [X] T046 [P] Review `frontend/src/` for zero business logic (no client-side threshold/format
+      computation — everything sourced from `ChartDataResponseDto`) (constitution Principle II).
+      Clean, no changes needed — verified by grepping all of `frontend/src` for the threshold value
+      (`150`) and any other stray domain constant: the only matches are code comments, not literal
+      values in logic. `buildRoiVisualMap()`'s `Math.min`/`Math.max` over the series' own values is
+      not business logic — it derives *rendering* bounds (the ECharts crash workaround, T037) for a
+      classification (`lte`/`gt` the DTO's own `roiThreshold.value`) that's fully data-driven, not
+      a client-side re-derivation of what counts as "above" or "at/below." `tooltipFormatter.ts`'s
+      date reformatting (ISO → `DD.MM.YYYY`) and `value.toFixed(decimals)` are presentation
+      formatting using a backend-supplied precision (`decimals`), not computed business values —
+      matches data-model.md's explicit rationale for shipping `decimals` in the DTO precisely so
+      the frontend never has to guess a format.
 
 ---
 

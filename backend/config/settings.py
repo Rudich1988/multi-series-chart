@@ -11,7 +11,11 @@ load_dotenv(ENV_FILE)
 
 
 class BaseConfig:
-    SECRET_KEY = os.environ["SECRET_KEY"]
+    # Dev-only placeholder so the stack boots with zero required setup (Django's own
+    # `startproject` scaffolding uses the same "django-insecure-" prefix convention to flag a key
+    # that must never be used in production). Override via `.env` for anything beyond local/demo
+    # use.
+    SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-dev-placeholder-change-me")
     DEBUG = os.environ.get("DEBUG", "False").strip().lower() == "true"
     ALLOWED_HOSTS = [
         host.strip() for host in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
