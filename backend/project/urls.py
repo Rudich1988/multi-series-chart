@@ -20,12 +20,9 @@ from django.urls import path
 
 from api import (
     exceptions,  # noqa: F401  # registers @api.exception_handler(...) on api.ninja_app.api
+    routers,  # noqa: F401  # registers each domain's router onto api.ninja_app.api (currently: chart)
 )
 from api.ninja_app import api
-from chart import (
-    router,  # noqa: F401  # registers the chart router onto api.ninja_app.api, validates the
-    # dataset file at import time (fail-fast — see chart/router.py)
-)
 from config.settings import config
 
 urlpatterns = [

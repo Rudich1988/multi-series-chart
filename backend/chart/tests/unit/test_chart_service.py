@@ -1,11 +1,11 @@
 from datetime import date
 
-from chart.service import get_chart_dataset
+from chart.service import chart_service
 from chart.types import SeriesKey
 
 
 def test_get_chart_dataset_returns_valid_dataset():
-    dataset = get_chart_dataset()
+    dataset = chart_service.get_chart_dataset()
 
     assert dataset.dates == sorted(dataset.dates)
     assert len(dataset.dates) == len(set(dataset.dates))

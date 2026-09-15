@@ -108,9 +108,12 @@ backend/
 ├── api/                      # shared HTTP composition root — NOT domain-specific; this is where a
 │   │                          # second domain's router/exceptions would also get wired in, if one existed
 │   ├── ninja_app.py          # the one NinjaAPI instance, shared across all domains
-│   └── exceptions.py         # imports each domain's exception classes (e.g. chart.exceptions),
-│                              # registers @api.exception_handler(...) mapping each to an HTTP response —
-│                              # the exception *class* is NOT defined here, only the HTTP-mapping wiring
+│   ├── exceptions.py         # imports each domain's exception classes (e.g. chart.exceptions),
+│   │                          # registers @api.exception_handler(...) mapping each to an HTTP response —
+│   │                          # the exception *class* is NOT defined here, only the HTTP-mapping wiring
+│   └── routers.py            # imports each domain's router (e.g. chart.router.router) and calls
+│                              # api.add_router(...) — symmetric with exceptions.py (research.md §11.1);
+│                              # a domain's own router.py only defines its router, never registers itself
 └── chart/                    # the "chart" domain — everything specific to it lives together, not
     │                          # spread across technical layers (routers/schemas/services/dto each own folder)
     ├── types.py               # SeriesKey enum, ChartType literal — framework-free vocabulary
@@ -120,23 +123,26 @@ backend/
     ├── dto.py                  # dataclasses: SeriesData, ChartDataset, ROIThresholdConfig — named
     │                          # dto.py, not models.py, to avoid Django's ORM-models connotation
     ├── dataset_schema.py       # Pydantic: RawDatasetFile — validates the raw dataset file's shape
-    │                          # (research.md §12); the one place chart/ imports pydantic outside schemas.py
+    │                          # (research.md §12); one of two places chart/ imports pydantic (with schemas.py)
     ├── loader.py               # load_chart_dataset(path): read file -> validate via dataset_schema.py
-    │                          # -> merge with presentation.py -> build dto.py objects
+    │                          # -> merge with presentation.py -> build dto.py objects. The other of
+    │                          # the two files (with dataset_schema.py) that imports pydantic — kept
+    │                          # out of service.py on purpose (research.md §12, §13.1)
     ├── exceptions.py           # ChartDataUnavailableError, InvalidDatasetError — plain Exception
     │                          # subclasses, no pydantic/ninja import, so loader.py/service.py can
     │                          # raise them without depending on api/
-    ├── service.py              # business logic: thin wrapper calling loader.load_chart_dataset;
-    │                          # no pydantic/ninja imports
+    ├── service.py              # ChartService class (singleton: chart_service = ChartService()):
+    │                          # get_chart_dataset() delegates to loader.load_chart_dataset(path);
+    │                          # no pydantic/ninja imports (research.md §13.1)
     ├── schemas.py               # Pydantic request/response schemas (boundary-only)
-    ├── router.py                # GET /chart-data — thin: parse -> call service -> return; registered
-    │                          # onto the shared `api` instance from api/ninja_app.py; calls
-    │                          # load_chart_dataset once at import time so a malformed dataset file
-    │                          # fails `make up` immediately instead of failing on first request
+    ├── router.py                # GET /chart-data — thin: parse -> call service -> return; does NOT
+    │                          # import api/ or register itself (api/routers.py does that, §11.1);
+    │                          # calls chart_service.get_chart_dataset() once at import time so a
+    │                          # malformed dataset file fails `make up` immediately instead of failing on first request
     ├── data/
     │   └── sample_dataset.json  # substitutable dataset — the file User Story 4 documents editing
     └── tests/
-        ├── unit/                # service.py, loader.py, dto.py
+        ├── unit/                # service.py (ChartService), loader.py, dto.py
         ├── contract/            # router.py against contracts/chart-api.md
         └── integration/         # end-to-end request -> response
 
@@ -176,13 +182,16 @@ exception class, the service, the Pydantic schemas, and the router — lives tog
 `chart/`, rather than being scattered across technical-layer folders (`routers/`, `schemas/`,
 `services/`, `models/`) that would each mix multiple domains together if this project ever grew a
 second one. Only what is genuinely cross-domain/global stays outside `chart/`: `api/` (the shared
-`NinjaAPI` instance and the exception-handler *registration*, which a second domain would also
-plug into), `config/` (the single `Config` source), and `project/` (Django's own required
+`NinjaAPI` instance, the exception-handler *registration*, and the router *registration* —
+symmetric, research.md §11.1 — both of which a second domain would also plug into), `config/` (the
+single `Config` source), and `project/` (Django's own required
 framework shell). Within `chart/`, the layering the user originally specified is still enforced —
 `router.py` stays thin, `schemas.py` (HTTP) and `dataset_schema.py` (raw dataset file) are the only
 two files that import Pydantic, and `service.py`/`dto.py`/`exceptions.py` know nothing about
 Pydantic/HTTP (`loader.py` sits between them: it validates the file via `dataset_schema.py` so
-`service.py` never has to) — it's just that "layer" is now the organizing principle *inside* a
+`service.py` never has to — briefly merged into `ChartService` in research.md §13, reverted in
+§13.1 per user feedback) — it's just that "layer" is
+now the organizing principle *inside* a
 domain folder, not *instead of* one. Frontend isolates all
 environment-driven configuration in `src/config/` and keeps ECharts option-building
 (`buildChartOption.ts`) separate from the React component shell, so the mapping-from-API-DTO-to-

@@ -86,8 +86,8 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
   series (keyed by `SeriesKey`), and `roi_threshold.value`. `name`/`chart_type`/`color`/`decimals`
   per series, and the two threshold colors, are **not** in the file — they're a fixed constant
   table (`SERIES_METADATA` + the two `ROI_THRESHOLD_*_COLOR` constants) in
-  `backend/chart/presentation.py`, which `chart/loader.py` (see §12) merges with the raw file
-  data. Originally these were embedded in the file per-series (matching the HTTP response shape
+  `backend/chart/presentation.py`, which `chart/loader.py`'s `load_chart_dataset()` (see §12,
+  §13.1) merges with the raw file data. Originally these were embedded in the file per-series (matching the HTTP response shape
   1:1); moved out once it became clear that would let a reviewer's dataset substitution silently
   change the chart's colors — breaking Principle IV (reference fidelity) — and would force the
   service to fall back to "if this key then this color" branching for any field a reviewer omitted.
@@ -155,7 +155,7 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
 - **File placement, revised from the original task text**: the exception *classes* live in
   `chart/exceptions.py` (inside the domain, alongside `types.py`/`dto.py`), not
   `api/exceptions.py` — the same reasoning as the `SeriesKey`/`ChartType` split (research.md #4):
-  `chart/loader.py` (§12) needs to raise these, and if the classes lived in `api/exceptions.py`
+  `chart/loader.py` (§12, §13.1) needs to raise these, and if the classes lived in `api/exceptions.py`
   that would mean the domain importing *from* the shared HTTP composition root — the dependency
   direction is supposed to run the other way (see §11). `api/exceptions.py` only imports the
   classes from `chart/` and registers the HTTP mapping — `api/` depending on `chart/`, never the
@@ -164,7 +164,8 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
   `api/exceptions.py` — that would make `ninja_app` depend on `exceptions`, which depends on
   `ninja_app` (for the `api` object to decorate), a cycle. Instead `project/urls.py` — Django's
   natural one-time composition root — imports `api.exceptions` (for its `@api.exception_handler`
-  registration side effect) alongside mounting `api.urls`.
+  registration side effect) alongside mounting `api.urls`. `api/routers.py` (§11.1) follows the
+  same shape for router registration.
 - **Alternatives considered**: Per-router `try/except` blocks (rejected — explicitly disallowed).
   Defining the exception class directly in `api/exceptions.py` as the original task text specified
   (rejected once the service-layer import direction was considered — see above).
@@ -256,9 +257,9 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
   existed inside it). Now there is one `chart/` folder — the project's single bounded context —
   holding everything specific to it: `types.py`, `presentation.py`, `models.py`, `exceptions.py`,
   `service.py`, `schemas.py`, `router.py`, `data/`, `tests/`. Only what is genuinely cross-domain
-  stays outside: `api/` (the shared `NinjaAPI` instance + exception-handler *registration* — a
-  second domain would plug into this same `api/`, not get its own copy), `config/` (the single
-  global `Config`), and `project/` (Django's own required framework shell).
+  stays outside: `api/` (the shared `NinjaAPI` instance + exception-handler *registration* + router
+  *registration*, §11.1 — a second domain would plug into this same `api/`, not get its own copy),
+  `config/` (the single global `Config`), and `project/` (Django's own required framework shell).
 - **Rationale**: User feedback, directly: a `domain/` folder holding dataclasses/types/exceptions
   for potentially-many domains, sitting apart from `api/routers/`, `api/schemas/`, and `services/`
   which also each mix multiple domains together, is *layer-first* organization — you'd have to
@@ -281,15 +282,42 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
   asked for when types.py was split out of models.py; domain-first and single-purpose files are not
   in tension, this project just needed both corrected).
 
+### 11.1 Router registration centralized in `api/routers.py`, symmetric with `api/exceptions.py`
+
+- **Decision**: `chart/router.py` only defines the `Router` and its one endpoint — it no longer
+  imports `api.ninja_app` or calls `api.add_router(...)` itself. A new `api/routers.py` imports
+  `chart.router.router` and does `api.add_router("", chart_router)`. `project/urls.py` imports
+  `api.routers` (side-effect import, same pattern as `api.exceptions`) instead of importing
+  `chart.router` directly.
+- **Rationale**: User feedback — pointed out that `api/exceptions.py` already centralizes handler
+  registration for every domain (a domain only *defines* its exception classes; `api/` does the
+  registering), while the router did the opposite: `chart/router.py` was both defining *and*
+  self-registering. Two different patterns for the same underlying job ("plug a piece of a domain
+  into the shared `api`"). Fixed by making router registration follow the exact same shape as
+  exception registration — `api/` now owns *all* domain-pluggability decisions, not just exceptions.
+- **No circular import risk**: this only works because `chart/router.py` no longer needs anything
+  from `api/` — removing its `api.add_router(...)` call also removed its only reason to import
+  `api.ninja_app`. `api/routers.py` can safely import `chart.router` in one direction (`api` →
+  `chart`, same direction as `api/exceptions.py` → `chart.exceptions`).
+- **Alternatives considered**: Putting the registration call directly in `api/ninja_app.py` instead
+  of a separate `api/routers.py` (rejected — no circular-import problem either way, but keeping
+  `ninja_app.py` to just the bare instance and `routers.py`/`exceptions.py` as the two "what's
+  plugged in" files is more symmetric and keeps each file single-purpose, matching how
+  `exceptions.py` was already split out for the same reason). A generic router-registry / list of
+  `(prefix, router)` tuples to iterate over (rejected — YAGNI for a single-domain project; the
+  explicit one-line `api.add_router(...)` call in `api/routers.py` is exactly as much abstraction
+  as `api/exceptions.py` uses today, and a second domain would just add one more explicit line).
+
 ## 12. Validating the substitutable dataset file
 
 - **Decision**: The raw dataset file is validated with Pydantic at the point it's loaded — a new
   `chart/dataset_schema.py` (`RawDatasetFile`: `dates`, `series: dict[SeriesKey, list[float | None]]`,
   `roi_threshold.value`, plus a `model_validator` enforcing ascending/unique dates, exactly the 4
-  `SeriesKey`s present, and every series' value-list length matching `len(dates)`). A new
-  `chart/loader.py`'s `load_chart_dataset(path) -> ChartDataset` reads the file, validates it via
-  that model, merges the validated raw values with `chart/presentation.py`'s fixed metadata, and
-  builds the `chart/dto.py` objects. On a validation failure it raises `InvalidDatasetError`; on a
+  `SeriesKey`s present, and every series' value-list length matching `len(dates)`).
+  `chart/loader.py`'s `load_chart_dataset(path) -> ChartDataset` (briefly merged into
+  `ChartService` in §13, reverted in §13.1) reads the file, validates it via that model, merges
+  the validated raw values with `chart/presentation.py`'s fixed metadata, and builds the
+  `chart/dto.py` objects. On a validation failure it raises `InvalidDatasetError`; on a
   missing/unreadable file it raises `ChartDataUnavailableError` — these are now two distinct
   problems ("data present but wrong" vs. "data source unavailable"), previously conflated (there
   was no validation at all before this).
@@ -297,26 +325,26 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
   either go unhandled or get muddled into the `503` meant for "temporarily unavailable" — the wrong
   signal for "this data is permanently wrong until someone fixes the file." The user explicitly
   asked for Pydantic-based validation here, reusable if a non-file input method is ever added.
-- **Where the Pydantic import boundary actually is**: the original rule ("service layer imports
-  nothing from pydantic/ninja") is preserved by keeping this validation in `chart/loader.py`, not
-  `chart/service.py` — `chart/service.py` (T023) stays a thin wrapper that calls the loader and
-  never itself imports `pydantic`. The *boundary* this Pydantic model validates is redefined
-  slightly from "HTTP request/response only" to "any external, less-trusted input" — the
-  substitutable file counts, since a reviewer edits it by hand. `chart/schemas.py` (HTTP
-  request/response shaping) and `chart/dataset_schema.py` (raw file/input shaping) are kept as two
-  separate files despite both being Pydantic, since they validate different things with different
-  lifecycles (once at startup vs. per HTTP request).
+- **Where the Pydantic import boundary actually is**: validation lives in a separate
+  `chart/loader.py`, specifically so `chart/service.py` never imports `pydantic`. This was briefly
+  changed in §13 (`loader.py` merged into `ChartService`, making `service.py` import `pydantic`
+  directly) and reverted in §13.1 per user feedback — `chart/loader.py` is the current, stable
+  state. `chart/schemas.py` (HTTP request/response shaping) and `chart/dataset_schema.py` (raw
+  file/input shaping) are kept as two separate files despite both being Pydantic, since they
+  validate different things with different lifecycles (once at startup vs. per HTTP request).
 - **Status codes — three, not one**: `503` (`ChartDataUnavailableError`) stays reserved for genuine
   runtime unavailability (the file disappears *after* a successful startup — unlikely for static
   data, but the handler exists defensively). `500` (`InvalidDatasetError`) means "the server's own
   data is broken" — a deployment/config problem, not the caller's fault. Neither of these is a
   `4xx`, correctly — no client caused them. If a client-facing input path is ever added (see below),
   a genuinely bad *client* submission must **not** collapse into either of these — it needs a `4xx`.
-- **Fail fast at startup, not per-request**: `chart/router.py` (T025) is expected to call
-  `load_chart_dataset` once at import time (module level), so a malformed file crashes the
-  container immediately when `make up` runs, with a clear traceback identifying the exact problem
-  (e.g. "series 'cost' has 4 values but expected 5") — not a confusing `500`/`503` on the first
-  browser request, long after the reviewer has moved on and forgotten they edited the file.
+- **Fail fast at startup, not per-request**: `chart/router.py` calls
+  `chart_service.get_chart_dataset()` once at import time (module level), so a malformed file
+  crashes the container immediately when `make up` runs, with a clear traceback identifying the
+  exact problem (e.g. "series 'cost' has 4 values but expected 5") — not a confusing `500`/`503` on
+  the first browser request, long after the reviewer has moved on and forgotten they edited the
+  file. Verified by deliberately truncating a series' values array and confirming `manage.py check`
+  fails loudly with the precise validation error.
 - **Deferred: a form/upload endpoint instead of file-editing**: discussed and explicitly deferred —
   it would reopen the already-clarified User Story 4 decision (file-editing, no upload UI) for work
   that isn't part of what this assignment evaluates. No `Config` toggle field was added for this
@@ -333,3 +361,53 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
   `chart/schemas.py` alongside the HTTP schemas (rejected — different boundary, different lifecycle;
   keeping them separate makes it obvious at a glance which one governs a per-request HTTP body vs.
   a once-at-startup file read). Building the form endpoint now (rejected — see "Deferred" above).
+
+## 13. `ChartService` — class-based service, `loader.py` merged in (superseded — see §13.1)
+
+- **Decision**: `chart/service.py` no longer exposes a module-level `get_chart_dataset()` function.
+  It defines a single class, `ChartService`, with two methods — `get_chart_dataset(self)` (no
+  args, uses `config.DATASET_PATH`) and `load_chart_dataset(self, path)` (explicit path, used
+  directly by tests with `tmp_path`-constructed files) — and exports one singleton instance,
+  `chart_service = ChartService()`, the same pattern already used for `config`. The standalone
+  `chart/loader.py` from §12 was deleted; its logic (read file → validate via
+  `chart/dataset_schema.py` → merge with `chart/presentation.py` → build `chart/dto.py` objects) is
+  now `ChartService.load_chart_dataset`'s body, unchanged. `chart/router.py` and
+  `chart/tests/unit/test_chart_service.py` (which absorbed `test_loader.py`'s four cases) were
+  updated to call `chart_service.get_chart_dataset()` / `chart_service.load_chart_dataset(path)`.
+- **Rationale**: User feedback — class-based style should prevail over function-based style
+  throughout the service layer, and a separate `loader.py` was one file too many for what is really
+  one cohesive responsibility ("get me the chart dataset").
+- **Trade-off, stated explicitly**: this reopens something §12 had deliberately protected —
+  `chart/service.py` now imports `pydantic` (`ValidationError`, `RawDatasetFile`) directly, which
+  the original constitution-level instruction ("service layer... ничего не знает о Pydantic")
+  argued against. Flagged to the user rather than silently either violating the original rule or
+  refusing the new one; proceeding on the user's explicit instruction. `chart/dataset_schema.py`
+  stays a separate file regardless (§12's reasoning for that split — different boundary/lifecycle
+  from `chart/schemas.py` — is unaffected by this change and still holds).
+- **Alternatives considered**: Keeping `load_chart_dataset` as a private method (`_load_chart_dataset`)
+  (rejected — T022a's tests need to call it directly with an explicit `tmp_path`; a leading
+  underscore would make that an intentional violation of Python's privacy-by-convention for no
+  benefit). Catching a bare `Exception` instead of `pydantic.ValidationError` specifically, to avoid
+  naming `pydantic` in `service.py` (rejected — hides unrelated bugs behind the same
+  `InvalidDatasetError`, and the class still functionally depends on `pydantic`'s validation
+  behavior either way; naming the exception precisely is more honest, not less).
+
+### 13.1 Reverted: `loader.py` restored as a standalone file
+
+- **Decision**: The merge in §13 above was undone per user feedback ("не устраивает... loader
+  выносим обратно" — noticed too late, doesn't work, move the loader back out). `chart/loader.py`
+  exists again with the exact same `load_chart_dataset(path) -> ChartDataset` function it had
+  before §13. `ChartService` keeps its class shape (the user did not object to that part) but
+  shrinks back to one method: `get_chart_dataset(self)`, which delegates to
+  `loader.load_chart_dataset(config.DATASET_PATH)`. The `load_chart_dataset(self, path)` method
+  added to the class in §13 is removed — with the logic back in `loader.py`, a same-named class
+  method that only forwarded to it would be pure indirection.
+- **What this restores**: `chart/service.py` no longer imports `pydantic` — §13's trade-off is
+  gone. `chart/dataset_schema.py` was never affected by any of this (still separate, still the
+  validation contract a future form endpoint would reuse).
+- **Tests**: `chart/tests/unit/test_chart_service.py` shrinks back to its one original test
+  (`chart_service.get_chart_dataset()`); the four loader-specific tests move back to their own
+  `chart/tests/unit/test_loader.py`, calling `chart.loader.load_chart_dataset` directly — the exact
+  split that existed before §13.
+- **`chart/router.py` needed no changes** — it already called `chart_service.get_chart_dataset()`,
+  never `loader`/`load_chart_dataset` directly, so the public surface it depends on didn't move.

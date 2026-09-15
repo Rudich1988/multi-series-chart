@@ -121,13 +121,15 @@ is done.**
       data; they now live in `backend/config/presentation.py`'s `PresentationConfig` (a plain
       class, no `pydantic`, no `.env` — see research.md §3), with `backend/chart/presentation.py`
       building the domain-typed `SERIES_METADATA` from it.
-      **Note for T023**: `chart/service.py` delegates to `chart/loader.py`'s
-      `load_chart_dataset()`, which validates this file via `chart/dataset_schema.py` (Pydantic)
-      before merging it with `SERIES_METADATA`/`ROI_THRESHOLD_*_COLOR` to build the
-      `SeriesData`/`ROIThresholdConfig` objects — see T023a/T023b below and research.md §12. The
+      **Note for T023**: `chart/loader.py`'s `load_chart_dataset()` validates this
+      file via `chart/dataset_schema.py` (Pydantic) before merging it with
+      `SERIES_METADATA`/`ROI_THRESHOLD_*_COLOR` to build the `SeriesData`/`ROIThresholdConfig`
+      objects — see T023a/T023b below and research.md §12, §13.1. The
       HTTP response shape itself (`contracts/chart-api.md`) is unchanged.
 - [X] T016 Create the `NinjaAPI` instance and router-registration scaffold in
-      `backend/api/ninja_app.py`, mounted from `backend/project/urls.py` (depends on T012)
+      `backend/api/ninja_app.py`, mounted from `backend/project/urls.py` (depends on T012).
+      **Extended later**: the actual router-registration *call* moved into a new
+      `backend/api/routers.py` (see T025's note) — `ninja_app.py` stays just the bare instance.
 - [X] T017 [P] Define the domain exception(s) — `ChartDataUnavailableError` and (added per
       research.md §12) `InvalidDatasetError` — in `backend/chart/exceptions.py` (not
       `api/exceptions.py` as originally written — the service/loader layer needs to raise these, so
@@ -170,8 +172,8 @@ chart; confirm a loading indicator appears before data arrives.
 - [X] T022 [P] [US1] Unit test for `chart_service.get_chart_dataset()` in
       `backend/chart/tests/unit/test_chart_service.py`, asserting it returns a valid `ChartDataset`
       (dates ascending/unique, exactly 4 series, values aligned to dates) by loading the real
-      `sample_dataset.json` end-to-end through `chart/loader.py`. Was red
-      (`ModuleNotFoundError: chart.service`) until T023; now passes.
+      `sample_dataset.json` end-to-end. Was red (`ModuleNotFoundError: chart.service`) until T023;
+      now passes.
       Added `pytest`/`pytest-django` as dev dependencies and `[tool.pytest.ini_options]`
       (`DJANGO_SETTINGS_MODULE = "project.settings"`) in `pyproject.toml` — no test tooling existed
       before this task.
@@ -179,27 +181,38 @@ chart; confirm a loading indicator appears before data arrives.
       `backend/chart/tests/unit/test_loader.py` — added per research.md §12: assert it raises
       `InvalidDatasetError` on a mismatched-length series and on a missing `SeriesKey`, raises
       `ChartDataUnavailableError` on a missing file, and correctly merges a valid file's raw values
-      with `chart/presentation.py`'s fixed metadata. **All 4 pass** — `chart/loader.py` was already
-      implemented (built ahead of schedule alongside T017).
+      with `chart/presentation.py`'s fixed metadata, calling `chart.loader.load_chart_dataset`
+      directly. **Round-trip note**: briefly folded into `test_chart_service.py` when `loader.py`
+      was merged into `ChartService` (research.md §13); restored to its own file in §13.1 when the
+      user reverted that merge. **All 4 pass** — `chart/loader.py` was already implemented (built
+      ahead of schedule alongside T017).
 
 ### Implementation for User Story 1
 
 - [X] T023a [P] [US1] Define `chart/dataset_schema.py` — added per research.md §12: a Pydantic
       `RawDatasetFile` model validating the raw dataset file's shape (`dates` ascending/unique,
       `series: dict[SeriesKey, list[float | None]]` with exactly the 4 keys and each list's length
-      matching `dates`, `roi_threshold.value`) — the one file in `chart/` besides `schemas.py` that
-      imports `pydantic`, kept separate from `schemas.py` since it validates a different boundary
-      (the file, not an HTTP request) with a different lifecycle (once at startup, not per request).
-      Built ahead of schedule alongside T017; covered by T022a's tests.
+      matching `dates`, `roi_threshold.value`) — one of the two files in `chart/` that import
+      `pydantic` outside `schemas.py` (the other being `loader.py`, see T023b), kept separate
+      from `schemas.py` since it validates a different boundary (the file, not an HTTP request)
+      with a different lifecycle (once at startup, not per request). Built ahead of schedule
+      alongside T017; covered by T022a's tests.
 - [X] T023b [US1] Implement `chart/loader.py`'s `load_chart_dataset(path) -> ChartDataset` — added
       per research.md §12: reads the file, validates via `chart/dataset_schema.py` (raising
       `InvalidDatasetError` on failure, `ChartDataUnavailableError` if the file can't be read),
       merges the validated raw values with `chart/presentation.py`'s `SERIES_METADATA`/
       `ROI_THRESHOLD_*_COLOR`, builds a `ChartDataset` (depends on T014, T015, T017, T023a). Built
-      ahead of schedule alongside T017; covered by T022a's tests.
-- [X] T023 [US1] Implement `chart_service.get_chart_dataset()` in `backend/chart/service.py` as a
-      thin wrapper delegating to `chart/loader.py`'s `load_chart_dataset(config.DATASET_PATH)` —
-      `service.py` itself imports no `pydantic`/`ninja` (depends on T023b)
+      ahead of schedule alongside T017; covered by T022a's tests. **Round-trip note**: briefly
+      merged into `ChartService` (research.md §13) per an earlier "class-based, no loader.py"
+      request, then restored as its own file (§13.1) once the user decided that merge didn't work
+      for them — "loader выносим обратно."
+- [X] T023 [US1] Implement `ChartService` in `backend/chart/service.py` — a class with one method,
+      `get_chart_dataset(self)` (no args, uses `config.DATASET_PATH`), delegating to
+      `chart/loader.py`'s `load_chart_dataset(path)`, exported as a singleton
+      `chart_service = ChartService()` (same pattern as `config`). `service.py` itself imports no
+      `pydantic`/`ninja` — the class wraps `loader.py`, it doesn't absorb it (research.md §13.1;
+      an intermediate version briefly did absorb `loader.py` into the class — see §13 — reverted
+      per user feedback) (depends on T023b)
 - [X] T024 [P] [US1] Define the Pydantic boundary schemas (`ChartDataResponse`, `SeriesSchema`,
       `ROIThresholdSchema`) in `backend/chart/schemas.py`, plus the dataclass↔schema mapping
       functions (depends on T014). The "mapping function" is `ChartDataResponse.from_dataset()`,
@@ -209,9 +222,14 @@ chart; confirm a loading indicator appears before data arrives.
       `contracts/chart-api.md`'s example response exactly.
 - [X] T025 [US1] Implement the thin `GET /chart-data` router in `backend/chart/router.py`:
       calls `chart_service.get_chart_dataset()` and returns the mapped schema, no business logic,
-      no `try/except`; registered onto the shared `api` instance from `api/ninja_app.py` via
-      `api.add_router("", router)` at module level — `project/urls.py` imports `chart.router` for
-      this side effect, same pattern as `api.exceptions` (T017). **Also calls `load_chart_dataset`
+      no `try/except`. **Revised, registration centralized (research.md §11.1)**: originally
+      `chart/router.py` self-registered via `api.add_router("", router)` at module level; per user
+      feedback (asymmetric with how `api/exceptions.py` centrally registers handlers instead of
+      each domain registering its own), that call moved to a new `backend/api/routers.py`
+      (`from chart.router import router as chart_router; api.add_router("", chart_router)`) —
+      `chart/router.py` itself no longer imports `api` at all. `project/urls.py` now imports
+      `api.routers` (not `chart.router` directly) for the side effect, same pattern as
+      `api.exceptions` (T017). **Also calls `load_chart_dataset`
       once at module import time** (research.md §12) so a malformed dataset file crashes `make up`
       immediately with a clear traceback, instead of surfacing as a confusing `500`/`503` on the
       first browser request — verified by deliberately truncating a series' values array and

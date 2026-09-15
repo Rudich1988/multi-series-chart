@@ -1,9 +1,11 @@
 # Phase 1 Data Model: Overlaid Multi-Series Performance Chart
 
 This model spans two representations per the layered architecture (research.md #4):
-**backend dataclasses** (service layer, no Pydantic/HTTP knowledge) and the **HTTP contract shape**
-they are converted to/from at the boundary (see `contracts/chart-api.md`). Both describe the same
-four entities identified in `spec.md` § Key Entities.
+**backend dataclasses** (`chart/dto.py` — plain, no Pydantic/HTTP knowledge) and the **HTTP
+contract shape** they are converted to/from at the boundary (see `contracts/chart-api.md`). Both
+describe the same four entities identified in `spec.md` § Key Entities. (The dataclasses themselves
+stay Pydantic-free; so does `ChartService` — the Pydantic validation of the raw dataset file lives
+in `chart/loader.py`, see research.md §12, §13.1.)
 
 ## Entities
 
@@ -15,7 +17,7 @@ the `ChartType` literal alongside it), not a dataclass, so both the dataclass la
 (`chart/dto.py`) and the HTTP boundary (`chart/schemas.py`) import it from this one neutral
 place within the domain — no duplicated definitions, and the dependency direction stays
 schemas → types, never the reverse. (`types.py`/`dto.py`/`presentation.py`/`dataset_schema.py`/
-`loader.py`/`exceptions.py`/`service.py`/`schemas.py`/`router.py` all live together inside
+`exceptions.py`/`service.py`/`schemas.py`/`router.py` all live together inside
 `chart/` — the project's one domain folder — per research.md §11; only the shared `NinjaAPI`
 instance and its exception-handler registration live outside it, in `api/`. `dto.py` — not
 `models.py` — because in Django, `models.py` conventionally means ORM models, and these are plain
@@ -63,9 +65,11 @@ environment-varying settings (`SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `CORS_ALLO
 
 **Validating the file before any of this runs**: the raw file is checked against
 `chart/dataset_schema.py`'s `RawDatasetFile` (Pydantic — dates ascending/unique, exactly the 4
-`SeriesKey`s present, every values-array length matching `dates`) by `chart/loader.py` before it's
-merged with `SERIES_METADATA` into a `ChartDataset`. A malformed file raises `InvalidDatasetError`;
-a missing/unreadable one raises `ChartDataUnavailableError` — see `research.md` §12.
+`SeriesKey`s present, every values-array length matching `dates`) by `chart/loader.py`'s
+`load_chart_dataset()`, which `ChartService.get_chart_dataset()` (`chart/service.py`) delegates to,
+before it's merged with `SERIES_METADATA` into a `ChartDataset`. A malformed file raises
+`InvalidDatasetError`; a missing/unreadable one raises `ChartDataUnavailableError` — see
+`research.md` §12, §13.1.
 
 Validation rules:
 - `len(values) == len(ChartDataset.dates)` for every series in a given `ChartDataset` (enforced by
@@ -127,9 +131,13 @@ See `contracts/chart-api.md` for the full request/response contract. Summary of 
 - `ROIThresholdConfig` (dataclass) ⇄ `ROIThresholdSchema` (nested Pydantic schema)
 
 The router (`chart/router.py`) is the only place these two representations meet: it calls
-`chart/service.py`'s `get_chart_dataset() -> ChartDataset`, then constructs
-`ChartDataResponse.from_dataclass(...)` (or an equivalent explicit mapping function) for
-serialization. The service layer never imports `ninja` or `pydantic`.
+`chart_service.get_chart_dataset() -> ChartDataset` (the `ChartService` singleton in
+`chart/service.py`), then constructs `ChartDataResponse.from_dataset(...)` — which delegates to
+Pydantic v2's `model_validate(..., from_attributes=True)` — for serialization. `chart/service.py`
+itself stays Pydantic-free: `ChartService.get_chart_dataset()` delegates to `chart/loader.py`'s
+`load_chart_dataset()`, which is where the raw dataset file is actually validated against
+`chart/dataset_schema.py`'s `RawDatasetFile` (research.md §12, §13.1). `chart/dto.py` (the plain
+dataclasses `SeriesData`/`ChartDataset`/`ROIThresholdConfig` themselves) stays Pydantic-free too.
 
 ## Frontend Types (TypeScript, mirrors the HTTP contract, not the backend dataclasses)
 
