@@ -135,12 +135,16 @@ is done.**
       correct; see research.md §5) and register their `@api.exception_handler(...)` mapping to HTTP
       responses (`ChartDataUnavailableError` → `503`, `InvalidDatasetError` → `500`, both logged via
       `logger.exception(exc)`) in `backend/api/exceptions.py` (depends on T016; research.md §5, §12)
-- [ ] T018 [P] Implement the frontend `Config` in `frontend/src/config/index.ts`, reading
+- [X] T018 [P] Implement the frontend `Config` in `frontend/src/config/index.ts`, reading
       `import.meta.env.VITE_*` once (no other file reads `import.meta.env` directly)
-- [ ] T019 [P] Define the frontend DTO types (`SeriesDto`, `RoiThresholdDto`,
+- [X] T019 [P] Define the frontend DTO types (`SeriesDto`, `RoiThresholdDto`,
       `ChartDataResponseDto`) in `frontend/src/types/chart.ts` per `data-model.md`
-- [ ] T020 [P] Scaffold `frontend/src/App.tsx` and `frontend/src/main.tsx` rendering an empty
-      `MultiSeriesChart` container (depends on T004)
+- [X] T020 [P] Scaffold `frontend/src/App.tsx` and `frontend/src/main.tsx` rendering an empty
+      `MultiSeriesChart` container (depends on T004). **Also removed**: the Vite/React demo content
+      this displaced — `App.css` and its now-unreferenced assets (`hero.png`, `react.svg`,
+      `vite.svg`, `public/icons.svg`), and fixed the leftover `<title>scaffold-tmp</title>` in
+      `index.html` (same leftover class as T004's `package.json` name, missed there) to
+      "Multi-Series Chart".
 
 **Checkpoint**: Config, domain types, API scaffolding, and frontend scaffolding exist on both
 sides — user story implementation can now begin.
