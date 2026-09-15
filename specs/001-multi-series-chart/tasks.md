@@ -300,9 +300,25 @@ enter/leave, and correct in-bounds positioning near the first/last date.
 
 ### Tests for User Story 2
 
-- [ ] T031 [P] [US2] Unit test for the tooltip formatter's output (date line + one row per series
+- [X] T031 [P] [US2] Unit test for the tooltip formatter's output (date line + one row per series
       with colored dot + value, "no data" for `null`) in
-      `frontend/tests/unit/tooltipFormatter.test.ts`
+      `frontend/tests/unit/tooltipFormatter.test.ts`. **Design decision**: the test targets a new,
+      not-yet-implemented pure module `frontend/src/components/MultiSeriesChart/tooltipFormatter.ts`
+      exporting `formatTooltip(isoDate: string, rows: TooltipSeriesValue[]): string` — kept separate
+      from `buildChartOption.ts` so the HTML-formatting logic (date reformatting, per-series decimal
+      precision, "no data" substitution, colored-dot markup) stays independently unit-testable
+      without mocking ECharts, mirroring how `buildChartOption.ts` itself is a pure, testable
+      function; T032 will wire it into `buildChartOption()`'s `tooltip.formatter`, mapping ECharts'
+      raw axis-trigger `params` (plus `data.series[i].name/color/decimals`) into
+      `TooltipSeriesValue[]`. Exact row format (colored dot, `Name: value`, `DD.MM.YYYY` date —
+      converted from the backend's ISO `YYYY-MM-DD`) taken directly from
+      `specs/reference/frames/frame_10.png`. Covers: ISO→`DD.MM.YYYY` date conversion, one row per
+      series with value formatted to that series' own `decimals`, series color present per row,
+      `null` → "no data" (not a number), and row order preserved. **Was red as expected**
+      (`Failed to resolve import ".../tooltipFormatter". Does the file exist?`, verified via
+      `docker compose run --rm frontend npm run test -- tooltipFormatter`) — same TDD pattern as
+      T021/T022 (test written before the implementation module exists; T032 will make it pass).
+      `prettier --write` / `oxlint` clean on the new file.
 
 ### Implementation for User Story 2
 
