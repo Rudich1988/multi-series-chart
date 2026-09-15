@@ -44,9 +44,9 @@ TypeScript + Vite + ECharts, `node_modules`-managed), with `docker-compose.yml`,
 - [X] T003 [P] Scaffold the Django project shell in `backend/project/settings.py`,
       `backend/project/urls.py`, `backend/project/asgi.py`, and `backend/manage.py`
       (minimal, unused SQLite `DATABASES` entry per `research.md` §3)
-- [X] T004 [P] Initialize the frontend Vite + React + TypeScript project in `frontend/package.json`,
-      `frontend/tsconfig.json`, `frontend/vite.config.ts`, `frontend/index.html`, with `echarts` as
-      a dependency
+  - [X] T004 [P] Initialize the frontend Vite + React + TypeScript project in `frontend/package.json`,
+        `frontend/tsconfig.json`, `frontend/vite.config.ts`, `frontend/index.html`, with `echarts` as
+        a dependency
 - [X] T005 [P] Write `backend/Dockerfile` (Poetry install into the in-project venv, no global pip
       installs)
 - [X] T006 [P] Write `frontend/Dockerfile` (`npm ci` into local `node_modules`, no global npm
@@ -55,8 +55,8 @@ TypeScript + Vite + ECharts, `node_modules`-managed), with `docker-compose.yml`,
       with their port mappings (depends on T005, T006)
 - [X] T008 Write root `Makefile` with `up`, `down`, and `logs` targets wrapping
       `docker compose` (depends on T007)
-- [ ] T009 [P] Configure backend linting/formatting (ruff + black) in `backend/pyproject.toml`
-- [ ] T010 [P] Configure frontend linting/formatting (eslint + prettier) in `frontend/`
+- [X] T009 [P] Configure backend linting/formatting (ruff, lint + format) in `backend/pyproject.toml`
+- [X] T010 [P] Configure frontend linting/formatting (oxlint + prettier) in `frontend/`
 
 **Checkpoint**: `make up` builds both containers (even though they serve nothing feature-specific
 yet).
