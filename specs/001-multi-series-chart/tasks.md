@@ -162,19 +162,25 @@ chart; confirm a loading indicator appears before data arrives.
 
 ### Tests for User Story 1
 
-- [ ] T021 [P] [US1] Contract test for `GET /chart-data` in
+- [X] T021 [P] [US1] Contract test for `GET /chart-data` in
       `backend/chart/tests/contract/test_chart_endpoint.py`, asserting the response shape in
       `contracts/chart-api.md` (dates/series/roi_threshold fields, 4-series invariant, `null`
-      handling for missing values)
-- [ ] T022 [P] [US1] Unit test for `chart_service.get_chart_dataset()` in
+      handling for missing values). **Currently red, correctly**: `404` (no router registered yet)
+      — expected to turn green once T024/T025 exist; not a bug in this task.
+- [X] T022 [P] [US1] Unit test for `chart_service.get_chart_dataset()` in
       `backend/chart/tests/unit/test_chart_service.py`, asserting it returns a valid `ChartDataset`
       (dates ascending/unique, exactly 4 series, values aligned to dates) by loading the real
-      `sample_dataset.json` end-to-end through `chart/loader.py`
-- [ ] T022a [P] [US1] Unit test for `chart/loader.py`'s `load_chart_dataset()` in
+      `sample_dataset.json` end-to-end through `chart/loader.py`. **Currently red, correctly**:
+      `ModuleNotFoundError: chart.service` (T023 not built yet).
+      Added `pytest`/`pytest-django` as dev dependencies and `[tool.pytest.ini_options]`
+      (`DJANGO_SETTINGS_MODULE = "project.settings"`) in `pyproject.toml` — no test tooling existed
+      before this task.
+- [X] T022a [P] [US1] Unit test for `chart/loader.py`'s `load_chart_dataset()` in
       `backend/chart/tests/unit/test_loader.py` — added per research.md §12: assert it raises
       `InvalidDatasetError` on a mismatched-length series and on a missing `SeriesKey`, raises
       `ChartDataUnavailableError` on a missing file, and correctly merges a valid file's raw values
-      with `chart/presentation.py`'s fixed metadata
+      with `chart/presentation.py`'s fixed metadata. **All 4 pass** — `chart/loader.py` was already
+      implemented (built ahead of schedule alongside T017).
 
 ### Implementation for User Story 1
 
