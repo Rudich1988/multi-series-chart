@@ -77,8 +77,11 @@ is done.**
 - [X] T013 [P] Configure CORS in `backend/project/settings.py`, sourcing allowed origins from
       `Config` (depends on T012) — required from the first browser fetch onward, not just at
       deployment time
-- [ ] T014 [P] Define the domain dataclasses `SeriesData`, `ChartDataset`, `ROIThresholdConfig` in
-      `backend/domain/models.py` per `data-model.md` (no `pydantic`/`ninja` imports)
+- [X] T014 [P] Define the domain dataclasses `SeriesData`, `ChartDataset`, `ROIThresholdConfig` in
+      `backend/domain/models.py`, with the shared `SeriesKey` enum / `ChartType` literal factored
+      out into `backend/domain/types.py` (so the future `api/schemas/chart.py` shares one source of
+      truth instead of duplicating them), per `data-model.md` (no `pydantic`/`ninja` imports in
+      either file)
 - [ ] T015 [P] Create the seed dataset `backend/data/sample_dataset.json` (dates + all 4 series'
       values + `roi_threshold`) matching the shape in `contracts/chart-api.md`
 - [ ] T016 Create the `NinjaAPI` instance and router-registration scaffold in

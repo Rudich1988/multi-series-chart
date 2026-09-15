@@ -7,9 +7,14 @@ four entities identified in `spec.md` § Key Entities.
 
 ## Entities
 
-### SeriesKey (enum)
+### SeriesKey (enum) — `backend/domain/types.py`
 
 Canonical identifiers for the 4 fixed series. Fixed set — not user-extensible in this feature.
+Lives in `domain/types.py`, not `domain/models.py`: this is framework-free vocabulary (an enum and
+the `ChartType` literal alongside it), not a dataclass, so both the dataclass layer
+(`domain/models.py`) and the future HTTP boundary (`api/schemas/chart.py`) import it from this one
+neutral place — no duplicated definitions, and the dependency direction stays HTTP → domain, never
+the reverse.
 
 | Value | Display Name | Chart Type | Reference Color (approx.) |
 |---|---|---|---|
@@ -18,7 +23,7 @@ Canonical identifiers for the 4 fixed series. Fixed set — not user-extensible 
 | `roi_confirmed` | ROI confirmed | spline | dark green `#1B5E20` / light green `#8BC34A` (threshold-split, see `ROIThresholdConfig`) |
 | `conversions` | Conversions | line (straight segments + square markers) | magenta/purple `#B026C7` |
 
-### Series (backend dataclass: `SeriesData`)
+### Series (backend dataclass: `SeriesData`) — `backend/domain/models.py`
 
 One metric's full time series.
 

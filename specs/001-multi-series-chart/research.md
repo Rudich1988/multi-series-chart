@@ -67,6 +67,14 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
 - **Alternatives considered**: Passing Pydantic models straight into the service layer (rejected —
   explicitly disallowed by the user's instructions, and it would leak an HTTP-layer concern into
   business logic).
+- **Shared vocabulary vs. composite types**: `domain/` splits into `types.py` (the `SeriesKey` enum
+  and `ChartType` literal — framework-free value types) and `models.py` (the `SeriesData`/
+  `ChartDataset`/`ROIThresholdConfig` dataclasses that use them). Both `domain/models.py` and the
+  future `api/schemas/chart.py` import `SeriesKey`/`ChartType` from `domain/types.py`, so the two
+  layers can never drift into duplicate, independently-maintained copies of the same enum. This
+  stays consistent with "service layer imports nothing from pydantic/ninja" — `domain/types.py` has
+  no framework import either; it's the HTTP layer reaching *down* into domain vocabulary, not the
+  domain layer reaching up.
 
 ## 5. Centralized error handling
 

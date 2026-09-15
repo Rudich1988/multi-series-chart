@@ -107,7 +107,8 @@ backend/
 │   │   └── chart.py          # Pydantic request/response schemas (boundary-only)
 │   └── exceptions.py         # domain exception -> HTTP response mapping (@api.exception_handler)
 ├── domain/
-│   └── models.py             # dataclasses: SeriesData, ChartDataset, ROIThresholdConfig
+│   ├── types.py               # SeriesKey enum, ChartType literal — framework-free vocabulary shared by domain/models.py and api/schemas/chart.py
+│   └── models.py              # dataclasses: SeriesData, ChartDataset, ROIThresholdConfig
 ├── services/
 │   └── chart_service.py      # business logic: load data source, build ChartDataset; no pydantic/ninja imports
 ├── data/
