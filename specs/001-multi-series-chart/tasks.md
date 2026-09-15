@@ -44,7 +44,7 @@ TypeScript + Vite + ECharts, `node_modules`-managed), with `docker-compose.yml`,
 - [X] T003 [P] Scaffold the Django project shell in `backend/project/settings.py`,
       `backend/project/urls.py`, `backend/project/asgi.py`, and `backend/manage.py`
       (minimal, unused SQLite `DATABASES` entry per `research.md` §3)
-- [ ] T004 [P] Initialize the frontend Vite + React + TypeScript project in `frontend/package.json`,
+- [X] T004 [P] Initialize the frontend Vite + React + TypeScript project in `frontend/package.json`,
       `frontend/tsconfig.json`, `frontend/vite.config.ts`, `frontend/index.html`, with `echarts` as
       a dependency
 - [ ] T005 [P] Write `backend/Dockerfile` (Poetry install into the in-project venv, no global pip
