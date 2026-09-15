@@ -16,16 +16,28 @@ def handle_chart_data_unavailable(
     logger.exception(exc)
     return api.create_response(
         request,
-        {"error": {"code": "CHART_DATA_UNAVAILABLE", "message": "Chart data could not be loaded."}},
+        {
+            "error": {
+                "code": "CHART_DATA_UNAVAILABLE",
+                "message": "Chart data could not be loaded.",
+            }
+        },
         status=503,
     )
 
 
 @api.exception_handler(InvalidDatasetError)
-def handle_invalid_dataset(request: HttpRequest, exc: InvalidDatasetError) -> HttpResponse:
+def handle_invalid_dataset(
+    request: HttpRequest, exc: InvalidDatasetError
+) -> HttpResponse:
     logger.exception(exc)
     return api.create_response(
         request,
-        {"error": {"code": "INVALID_DATASET", "message": "Chart data is misconfigured."}},
+        {
+            "error": {
+                "code": "INVALID_DATASET",
+                "message": "Chart data is misconfigured.",
+            }
+        },
         status=500,
     )

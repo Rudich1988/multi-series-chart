@@ -64,9 +64,29 @@ TypeScript + Vite + ECharts, `node_modules`-managed), with `docker-compose.yml`,
 - [X] T007 Write root `docker-compose.yml` wiring the `backend` and `frontend` services together
       with their port mappings (depends on T005, T006)
 - [X] T008 Write root `Makefile` with `up`, `down`, and `logs` targets wrapping
-      `docker compose` (depends on T007)
-- [X] T009 [P] Configure backend linting/formatting (ruff, lint + format) in `backend/pyproject.toml`
-- [X] T010 [P] Configure frontend linting/formatting (oxlint + prettier) in `frontend/`
+      `docker compose` (depends on T007). **Revised** (post-implementation, user request): added
+      `lint` and `test` targets, each running both halves through Docker (`docker compose run --rm
+      backend poetry run ruff check .`/`ruff format --check .` + `docker compose run --rm frontend
+      npm run lint`/`format:check` for `lint`; `poetry run pytest` + `npm run test` for `test`) —
+      keeps Principle II's "verification always via Docker" true for lint/test too, not just `up`,
+      and gives a reviewer one command for each instead of having to know the underlying `docker
+      compose run` invocations.
+- [X] T009 [P] Configure backend linting/formatting (ruff, lint + format) in `backend/pyproject.toml`.
+      **Revised** (user request): `[tool.ruff] line-length` lowered from `100` to `85`. Since `E501`
+      is part of the already-selected `E` rule group, this is enforced by `ruff check`, not just
+      `ruff format` — re-ran `ruff format .` (auto-wrapped 6 files' code) then `ruff check .`, which
+      flagged 8 remaining over-length *comments* and one Django-scaffold string literal (the
+      formatter doesn't rewrap prose comments or string contents, only code structure). Fixed each
+      by hand: rewrapped comments in `chart/router.py`, `config/settings.py`, and
+      `chart/tests/unit/test_loader.py` to ≤85 chars per line; split
+      `project/settings.py`'s `AUTH_PASSWORD_VALIDATORS` dotted-path string into two adjacent
+      string literals (Python concatenates them at parse time — the standard idiom for a long
+      string constant that can't be reworded, cleaner than a `# noqa: E501`). `ruff check .`/`ruff
+      format --check .` clean afterward; full `pytest` suite re-run to confirm the reformatting
+      changed no behavior (still 7/7).
+- [X] T010 [P] Configure frontend linting/formatting (oxlint + prettier) in `frontend/`. No changes
+      needed for this request — `prettier`'s default `printWidth` (80) was already stricter than
+      backend's new 85-char rule, and `oxlint`/`prettier --check` were already clean.
 
 **Checkpoint**: `make up` builds both containers (even though they serve nothing feature-specific
 yet).
@@ -509,7 +529,14 @@ validation/exception code required.
       design record. **Revised after T042**: originally documented `cp backend/.env.example
       backend/.env` with a reminder to set `SECRET_KEY`, as a required step — updated once
       `SECRET_KEY` (and `docker-compose.yml`'s `env_file`) became fully optional (research.md §2),
-      so `.env` is now presented purely as an opt-in override.
+      so `.env` is now presented purely as an opt-in override. **Rewritten in Russian per user
+      request** ("сделай README.md на русском") — the user has stated in prior sessions they don't
+      read English (saved to persistent memory), so the reviewer-facing README, like every other
+      user-facing artifact in this project, needs to be in Russian. Content is equivalent, not just
+      translated: kept the mandatory dataset-substitution walkthrough (now with an inline JSON
+      example, not just prose) and the two-local-URL / `make down`/`make logs` bits, added a short
+      "Стек" section (backend/frontend/infra one-liners) and a "Тесты и линтер" section documenting
+      `make lint`/`make test` (see T008) and the 85-char backend line-length rule (see T009).
 - [X] T042 [US4] Manually verify `quickstart.md`'s Setup and Scenario 4 end-to-end on a clean clone:
       `make up` from scratch, substitute the dataset, confirm the chart reflects it, and confirm no
       step required a local Python/Node install (depends on T039, T040, T041). Simulated "clean

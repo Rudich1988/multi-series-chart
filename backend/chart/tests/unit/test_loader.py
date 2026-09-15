@@ -92,13 +92,17 @@ def test_load_chart_dataset_raises_unavailable_on_missing_file(tmp_path):
 
 
 def test_load_chart_dataset_serves_a_non_crossing_roi_dataset_unchanged():
-    # The threshold color split (US3) is purely a frontend rendering concern (visualMap on the
-    # already-loaded values) — the backend has no "crossing" special case, so a dataset that never
-    # crosses the threshold must load through the exact same, unmodified path as one that does.
+    # The threshold color split (US3) is purely a frontend rendering concern
+    # (visualMap on the already-loaded values) — the backend has no
+    # "crossing" special case, so a dataset that never crosses the
+    # threshold must load through the exact same, unmodified path as one
+    # that does.
     fixture_path = FIXTURES_DIR / "roi_no_crossing.json"
     dataset = load_chart_dataset(fixture_path)
 
-    roi_series = next(series for series in dataset.series if series.key == SeriesKey.ROI_CONFIRMED)
+    roi_series = next(
+        series for series in dataset.series if series.key == SeriesKey.ROI_CONFIRMED
+    )
     raw_values = json.loads(fixture_path.read_text())["series"]["roi_confirmed"]
 
     assert roi_series.values == raw_values

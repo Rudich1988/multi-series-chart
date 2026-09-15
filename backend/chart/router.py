@@ -6,8 +6,9 @@ from .service import chart_service
 
 router = Router()
 
-# Fail fast at import time: a malformed dataset file crashes `make up` immediately with a
-# clear traceback, instead of surfacing as a confusing 500/503 on the first browser request.
+# Fail fast at import time: a malformed dataset file crashes `make up`
+# immediately with a clear traceback, instead of surfacing as a confusing
+# 500/503 on the first browser request.
 chart_service.get_chart_dataset()
 
 

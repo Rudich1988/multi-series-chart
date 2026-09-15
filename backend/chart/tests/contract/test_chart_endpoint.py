@@ -12,7 +12,14 @@ def test_chart_data_endpoint_returns_expected_shape(client):
     assert series_keys == {"cost", "cpa", "roi_confirmed", "conversions"}
 
     for series in body["series"]:
-        assert set(series.keys()) == {"key", "name", "chart_type", "color", "decimals", "values"}
+        assert set(series.keys()) == {
+            "key",
+            "name",
+            "chart_type",
+            "color",
+            "decimals",
+            "values",
+        }
         assert len(series["values"]) == len(body["dates"])
         for value in series["values"]:
             assert value is None or isinstance(value, int | float)

@@ -1,21 +1,26 @@
 # Multi-Series Chart
 
-An interactive chart overlaying 4 time-series on one date axis — Cost (area), CPA (bar), ROI
-confirmed (spline, color-split at a threshold), and Conversions (line) — with a shared hover
-tooltip and per-series halo highlighting. Backend: Django + Django Ninja (REST API). Frontend:
-React + TypeScript + Apache ECharts. The frontend only renders; all data and business logic live
-in the backend.
+Интерактивный график с 4 наложенными временными рядами на одной оси дат — Cost (area), CPA
+(bar), ROI confirmed (spline, с жёсткой сменой цвета по порогу) и Conversions (line) — с общим
+тултипом при наведении и подсветкой (halo) точки каждой серии. Frontend только рендерит данные,
+вся бизнес-логика и данные — на backend.
 
-## Prerequisites
+## Стек
+
+- **Backend**: Python, Django + Django Ninja (REST API), Poetry
+- **Frontend**: React + TypeScript + Vite + Apache ECharts
+- **Инфраструктура**: Docker Compose, весь стек поднимается одной командой (`make up`)
+
+## Предпосылки
 
 - Docker + Docker Compose
 - `make`
 
-No local Python or Node install is required — backend dependencies are isolated in an in-project
-Poetry virtual environment and frontend dependencies in a local `node_modules`, both built and run
-entirely inside their containers.
+Локально устанавливать Python или Node не нужно — зависимости backend изолированы в
+in-project виртуальном окружении Poetry, зависимости frontend — в локальном `node_modules`;
+всё собирается и запускается внутри контейнеров.
 
-## Run it
+## Запуск
 
 ```sh
 git clone <repo-url>
@@ -26,36 +31,57 @@ make up
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:8000/api/chart-data
 
-Stop the stack with `make down`. Tail both containers' logs with `make logs`.
+Остановить стек: `make down`. Смотреть логи обоих контейнеров: `make logs`.
 
-No `.env` file is required — every backend setting, `SECRET_KEY` included, has a sensible default
-baked into `backend/config/settings.py`. For anything beyond local/demo use (a real deployment, a
-non-default CORS origin, ...), copy `backend/.env.example` to `backend/.env` and set what you need;
-`.env` is git-ignored, so it never leaves your machine.
+Файл `.env` не обязателен — у каждой настройки backend, включая `SECRET_KEY`, есть
+безопасное значение по умолчанию, прописанное в `backend/config/settings.py`. Если нужно что-то
+переопределить (для реального деплоя, другого CORS origin и т.д.) — скопируйте
+`backend/.env.example` в `backend/.env` и укажите нужные значения; `.env` в `.gitignore`, наружу
+не уходит.
 
-## Substituting your own data
+## Как подставить свои 4 набора данных
 
-1. Open `backend/chart/data/sample_dataset.json`. It holds only numbers: a `dates` array, one
-   values array per series (`cost`, `cpa`, `roi_confirmed`, `conversions` — same length as
-   `dates`, `null` for a missing value on a given date), and `roi_threshold.value`.
-2. Replace the values with your own 4 datasets and, optionally, the threshold value. Series
-   names, chart types, colors, and display precision are fixed in
-   `backend/chart/presentation.py` and don't need to be touched.
-3. Run `make up` again.
+1. Откройте `backend/chart/data/sample_dataset.json`. В файле — только числа: массив `dates`,
+   по одному массиву значений на каждую серию (`cost`, `cpa`, `roi_confirmed`, `conversions` —
+   длина каждого массива равна длине `dates`; `null` — если на эту дату данных нет) и
+   `roi_threshold.value` — пороговое значение для ROI confirmed.
+2. Замените значения на свои 4 набора данных и, при желании, пороговое значение. Названия
+   серий, тип графика (area/bar/spline/line), цвета и точность отображения (`decimals`)
+   зафиксированы в `backend/chart/presentation.py` и трогать их не нужно — они не хранятся
+   в файле с данными.
+3. Запустите `make up` ещё раз.
 
-The running chart reflects the new data end-to-end, with no code changes.
+Пример структуры `sample_dataset.json`:
 
-## Tests
-
-```sh
-docker compose run --rm backend poetry run pytest
-docker compose run --rm frontend npm run test
+```json
+{
+  "dates": ["2026-06-10", "2026-06-11", "2026-06-12", "2026-06-13", "2026-06-14"],
+  "series": {
+    "cost": [2.04, 25.85, 44.36, 55.65, 63.75],
+    "cpa": [0.68, 0.86, 1.23, 0.79, 0.71],
+    "roi_confirmed": [610.78, 180.5, 161.47, 56.33, 357.25],
+    "conversions": [3, 30, 36, 70, 90]
+  },
+  "roi_threshold": { "value": 150.0 }
+}
 ```
 
-## Project layout
+График отражает новые данные полностью, без изменения кода.
 
-- `backend/` — Django + Django Ninja REST API (`chart/` holds everything domain-specific; see
-  `specs/001-multi-series-chart/research.md` for the architecture rationale)
-- `frontend/` — React + TypeScript + Vite + ECharts, renders the chart from the backend's data
-- `specs/001-multi-series-chart/` — the full spec-driven design record (spec, plan, research,
-  data model, API contract, and a step-by-step validation guide in `quickstart.md`)
+## Тесты и линтер
+
+```sh
+make test   # backend: pytest, frontend: vitest
+make lint   # backend: ruff check + ruff format --check, frontend: oxlint + prettier --check
+```
+
+Backend отформатирован через `ruff` с ограничением строки в 85 символов (`backend/pyproject.toml`,
+`[tool.ruff] line-length`). Frontend отформатирован через `prettier` + `oxlint`.
+
+## Структура проекта
+
+- `backend/` — Django + Django Ninja REST API (`chart/` — всё специфичное для домена; архитектурные
+  решения и их обоснование — в `specs/001-multi-series-chart/research.md`)
+- `frontend/` — React + TypeScript + Vite + ECharts, рендерит график по данным с backend
+- `specs/001-multi-series-chart/` — полная спецификация проекта (spec, plan, research, data model,
+  контракт API и пошаговый гайд для ручной проверки в `quickstart.md`)

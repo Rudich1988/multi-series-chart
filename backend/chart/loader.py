@@ -16,7 +16,9 @@ def load_chart_dataset(path: Path) -> ChartDataset:
     try:
         raw_text = path.read_text()
     except OSError as exc:
-        raise ChartDataUnavailableError(f"could not read dataset file {path}: {exc}") from exc
+        raise ChartDataUnavailableError(
+            f"could not read dataset file {path}: {exc}"
+        ) from exc
 
     try:
         raw = RawDatasetFile.model_validate_json(raw_text)
