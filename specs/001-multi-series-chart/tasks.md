@@ -47,13 +47,13 @@ TypeScript + Vite + ECharts, `node_modules`-managed), with `docker-compose.yml`,
 - [X] T004 [P] Initialize the frontend Vite + React + TypeScript project in `frontend/package.json`,
       `frontend/tsconfig.json`, `frontend/vite.config.ts`, `frontend/index.html`, with `echarts` as
       a dependency
-- [ ] T005 [P] Write `backend/Dockerfile` (Poetry install into the in-project venv, no global pip
+- [X] T005 [P] Write `backend/Dockerfile` (Poetry install into the in-project venv, no global pip
       installs)
-- [ ] T006 [P] Write `frontend/Dockerfile` (`npm ci` into local `node_modules`, no global npm
+- [X] T006 [P] Write `frontend/Dockerfile` (`npm ci` into local `node_modules`, no global npm
       installs)
-- [ ] T007 Write root `docker-compose.yml` wiring the `backend` and `frontend` services together
+- [X] T007 Write root `docker-compose.yml` wiring the `backend` and `frontend` services together
       with their port mappings (depends on T005, T006)
-- [ ] T008 Write root `Makefile` with `up`, `down`, and `logs` targets wrapping
+- [X] T008 Write root `Makefile` with `up`, `down`, and `logs` targets wrapping
       `docker compose` (depends on T007)
 - [ ] T009 [P] Configure backend linting/formatting (ruff + black) in `backend/pyproject.toml`
 - [ ] T010 [P] Configure frontend linting/formatting (eslint + prettier) in `frontend/`
