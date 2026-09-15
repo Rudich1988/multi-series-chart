@@ -385,9 +385,21 @@ consistent color.
 
 ### Tests for User Story 3
 
-- [ ] T036 [P] [US3] Unit test asserting the `visualMap` piecewise configuration's boundary matches
+- [X] T036 [P] [US3] Unit test asserting the `visualMap` piecewise configuration's boundary matches
       `roiThreshold.value` and produces exactly two flat colors, in
-      `frontend/tests/unit/buildChartOption.test.ts` (new `describe` block for the ROI series)
+      `frontend/tests/unit/buildChartOption.test.ts` (new `describe` block for the ROI series).
+      **Design decision**: targets `option.visualMap` as a `type: 'piecewise'` config with
+      `seriesIndex` pointing at whichever index `roi_confirmed` ends up at in `data.series` (found
+      via `.findIndex`, not hardcoded — order-independent, same reasoning as T026/T032's
+      `key`-based matching) and exactly 2 `pieces`, colored from `roiThreshold.aboveColor`/
+      `atOrBelowColor`. The boundary piece uses `lte`/`gt` (not `max`/`min`, which in ECharts default
+      to a `[min, max)` half-open range) specifically so a value exactly equal to
+      `roiThreshold.value` is asserted to land in the `lte` (at/below) piece — spec Edge Cases:
+      "exactly on the threshold counts as at/below." 3 new tests (targeting/piecewise-type, exactly
+      2 colors, boundary placement). **Was red as expected** (`option.visualMap` is `undefined`
+      until T037; 3 new tests fail with `TypeError: Cannot read properties of undefined`, the other
+      5 existing tests unaffected) — same TDD pattern as T021/T022/T031. `prettier --write`/
+      `oxlint`/`tsc -b` clean.
 
 ### Implementation for User Story 3
 

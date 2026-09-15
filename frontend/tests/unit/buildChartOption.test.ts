@@ -116,3 +116,58 @@ describe('buildChartOption', () => {
     expect(series[0].data).toEqual([null, 25.85])
   })
 })
+
+interface TestVisualMapPiece {
+  color?: string
+  lte?: number
+  gt?: number
+}
+
+interface TestVisualMap {
+  type?: string
+  seriesIndex?: number
+  show?: boolean
+  pieces?: TestVisualMapPiece[]
+}
+
+describe('buildChartOption — ROI confirmed threshold color split (visualMap)', () => {
+  const roiIndex = sampleData.series.findIndex((s) => s.key === 'roi_confirmed')
+
+  it('targets the roi_confirmed series with a piecewise visualMap', () => {
+    const option = buildChartOption(sampleData)
+    const visualMap = option.visualMap as TestVisualMap
+
+    expect(visualMap.type).toBe('piecewise')
+    expect(visualMap.seriesIndex).toBe(roiIndex)
+  })
+
+  it('produces exactly two flat colors, taken from roiThreshold', () => {
+    const option = buildChartOption(sampleData)
+    const visualMap = option.visualMap as TestVisualMap
+
+    expect(visualMap.pieces).toHaveLength(2)
+    expect(visualMap.pieces?.map((p) => p.color).sort()).toEqual(
+      [
+        sampleData.roiThreshold.aboveColor,
+        sampleData.roiThreshold.atOrBelowColor,
+      ].sort(),
+    )
+  })
+
+  it('places the boundary at roiThreshold.value, counting the threshold itself as at/below', () => {
+    const option = buildChartOption(sampleData)
+    const visualMap = option.visualMap as TestVisualMap
+
+    const atOrBelowPiece = visualMap.pieces?.find(
+      (p) => p.color === sampleData.roiThreshold.atOrBelowColor,
+    )
+    const abovePiece = visualMap.pieces?.find(
+      (p) => p.color === sampleData.roiThreshold.aboveColor,
+    )
+
+    // `lte` (not `lt`/`max`) is the point: a value exactly on the threshold must render as
+    // at/below, per spec Edge Cases ("exactly on the threshold counts as at/below").
+    expect(atOrBelowPiece?.lte).toBe(sampleData.roiThreshold.value)
+    expect(abovePiece?.gt).toBe(sampleData.roiThreshold.value)
+  })
+})
