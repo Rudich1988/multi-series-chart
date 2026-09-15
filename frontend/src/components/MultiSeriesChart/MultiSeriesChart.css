@@ -1,0 +1,12 @@
+.multi-series-chart {
+  width: 100%;
+  height: 500px;
+}
+
+.multi-series-chart--loading,
+.multi-series-chart--error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 500px;
+}

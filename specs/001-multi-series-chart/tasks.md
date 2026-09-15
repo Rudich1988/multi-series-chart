@@ -235,23 +235,57 @@ chart; confirm a loading indicator appears before data arrives.
       first browser request — verified by deliberately truncating a series' values array and
       confirming `manage.py check` fails loudly with the exact validation error, not a silent
       partial boot (depends on T023, T024, T016)
-- [ ] T026 [P] [US1] Implement the frontend API client `fetchChartData()` in
+- [X] T026 [P] [US1] Implement the frontend API client `fetchChartData()` in
       `frontend/src/api/chartApi.ts`, calling `${config.apiBaseUrl}/chart-data` and typing the
-      result as `ChartDataResponseDto` (depends on T018, T019)
-- [ ] T027 [US1] Implement `buildChartOption()` base series mapping (area/bar/spline/line types,
+      result as `ChartDataResponseDto` (depends on T018, T019). **Critical fix found via manual
+      browser verification, not by the test suite**: the backend returns snake_case field names
+      (`chart_type`, `roi_threshold.above_color`) per `contracts/chart-api.md`, but the frontend
+      DTOs are camelCase (`data-model.md`'s "Frontend Types... mirrors the HTTP contract, not the
+      backend dataclasses" implies a mapping step). An initial version just did
+      `response.json() as ChartDataResponseDto` — a blind cast with no actual mapping — so
+      `series.chartType` was `undefined` at runtime and the chart silently rendered nothing (no
+      thrown error). Fixed by adding `RawSeries`/`RawRoiThreshold`/`RawChartDataResponse` types
+      matching the real wire shape and explicit `toSeriesDto`/`toRoiThresholdDto` mapping
+      functions. Caught only because the app was actually opened in a (headless, scripted) browser
+      against the real backend — both `buildChartOption`'s unit test and the original
+      `MultiSeriesChart` integration test used hand-typed camelCase fixtures that matched the
+      *wrong* assumption, so neither failed. T030's test was rewritten as a result (see below).
+- [X] T027 [US1] Implement `buildChartOption()` base series mapping (area/bar/spline/line types,
       one independent value scale per series) in
-      `frontend/src/components/MultiSeriesChart/buildChartOption.ts` (depends on T019)
-- [ ] T028 [US1] Implement `MultiSeriesChart.tsx` in
+      `frontend/src/components/MultiSeriesChart/buildChartOption.ts` (depends on T019).
+      `area`→`line`+`areaStyle`, `bar`→`bar`, `spline`→`line`+`smooth`, `line`→`line`+square
+      `symbol` (matching the reference's Conversions markers, data-model.md's Key Entities note).
+      Each series gets its own hidden `yAxis` (`scale: true`, so a low-magnitude series like CPA
+      isn't flattened against a shared zero-based scale) — satisfies FR-003. `null` values pass
+      straight through into ECharts' `data` arrays, which renders them as a gap — satisfies FR-012
+      for free, no extra code needed.
+- [X] T028 [US1] Implement `MultiSeriesChart.tsx` in
       `frontend/src/components/MultiSeriesChart/MultiSeriesChart.tsx`: fetches via `chartApi`,
       shows a loading indicator while in flight (FR-013a), shows an error state on failure
       (FR-013), otherwise renders the ECharts instance from `buildChartOption()` (depends on T026,
-      T027)
-- [ ] T029 [P] [US1] Frontend unit test for `buildChartOption()`'s series construction in
+      T027). Uses ECharts' imperative API directly (`echarts.init`/`setOption`/`dispose` in a
+      `useEffect`, no extra wrapper dependency like `echarts-for-react`) — matches research.md §6's
+      "imperative API or a thin React wrapper."
+- [X] T029 [P] [US1] Frontend unit test for `buildChartOption()`'s series construction in
       `frontend/tests/unit/buildChartOption.test.ts` (correct type/color/scale per series)
-- [ ] T030 [P] [US1] Frontend integration test for `MultiSeriesChart`'s loading/error/success
-      states in `frontend/tests/integration/MultiSeriesChart.test.tsx`
+- [X] T030 [P] [US1] Frontend integration test for `MultiSeriesChart`'s loading/error/success
+      states in `frontend/tests/integration/MultiSeriesChart.test.tsx`. **Revised per the T026
+      bug**: mocks the network boundary (`global.fetch`, via `vi.stubGlobal`) with realistic
+      snake_case backend JSON, not `chartApi` itself — so this test now actually exercises the real
+      mapping code and would have caught the T026 bug. `echarts` is still mocked (canvas rendering
+      is out of scope for this test; covered instead by manual browser verification below).
+      Added `vitest`/`@testing-library/react`/`jsdom` as dev dependencies and a `test` script /
+      `vite.config.ts` `test` block / `tests/setup.ts` (RTL `cleanup()`) — no frontend test tooling
+      existed before this task, mirroring T022's backend `pytest` setup.
 
 **Checkpoint**: User Story 1 is fully functional and independently testable — this is the MVP.
+Verified live via `make up` + Playwright (`/usr/bin/google-chrome`) against `quickstart.md`
+Scenario 1: (1) success case — chart renders with all 4 series, 1 canvas element, matching the
+reference GIF's visual style; (2) `docker compose stop backend` + frontend reload — body text
+shows exactly "Failed to load chart data." with 0 canvas elements (FR-013 satisfied, no blank/
+broken chart); (3) `docker compose start backend` — frontend recovers to a rendered chart (1
+canvas) without a manual page reload, confirming the component doesn't get stuck in the error
+state. Stack torn down with `make down` after verification.
 
 ---
 
