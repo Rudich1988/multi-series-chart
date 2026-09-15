@@ -144,3 +144,15 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
   instruction.
 - **Alternatives considered**: A single combined Dockerfile/container (rejected — explicitly
   disallowed; violates "independent containers").
+- **Dependency volumes vs. dependency drift**: `docker-compose.yml` bind-mounts host source into
+  both containers for live editing, with a *named volume* layered on top of `/app/.venv`
+  (backend) and `/app/node_modules` (frontend) so the container's own install isn't shadowed by
+  whatever is (or isn't) on the host. This has a sharp edge: a named volume persists across
+  `docker compose up --build`, so adding a dependency (e.g. `django-cors-headers` for T013) and
+  rebuilding is not enough — the old volume still shadows the image's freshly-installed
+  `.venv`/`node_modules`, and the app fails at runtime with a missing-module error even though the
+  image itself is correct. Caught exactly this way during T013. **Fix**: both Dockerfiles'
+  `CMD` re-syncs dependencies against the current lockfile at *container start*, not just at
+  image build — `poetry install --no-root && ...` (backend) and `npm ci && ...` (frontend) — so a
+  stale volume self-heals every `make up` instead of silently masking a missing dependency. Cheap
+  when nothing changed, correct when something did.

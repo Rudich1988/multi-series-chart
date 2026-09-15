@@ -68,13 +68,13 @@ yet).
 **Purpose**: Infrastructure every user story needs. **No user story work starts before this phase
 is done.**
 
-- [ ] T011 [P] Implement the single `Config` (`pydantic-settings` `BaseSettings`) in
+- [X] T011 [P] Implement the single `Config` (`pydantic-settings` `BaseSettings`) in
       `backend/config/settings.py` (API prefix, allowed CORS origins, dataset file path — no
       `os.environ()` calls anywhere else in the backend)
-- [ ] T012 Wire `backend/project/settings.py` to import its values from
+- [X] T012 Wire `backend/project/settings.py` to import its values from
       `config.settings.Config` rather than reading environment variables itself (depends on T011;
       research.md §2)
-- [ ] T013 [P] Configure CORS in `backend/project/settings.py`, sourcing allowed origins from
+- [X] T013 [P] Configure CORS in `backend/project/settings.py`, sourcing allowed origins from
       `Config` (depends on T012) — required from the first browser fetch onward, not just at
       deployment time
 - [ ] T014 [P] Define the domain dataclasses `SeriesData`, `ChartDataset`, `ROIThresholdConfig` in
