@@ -68,10 +68,13 @@ Stop the stack: `make down`.
 ## Scenario 4 — Substitute your own 4 datasets (User Story 4, SC-004)
 
 1. Locate the backend-side data source documented in the top-level `README.md` (the JSON file(s)
-   under `backend/data/`, per `research.md` §3).
+   under `backend/chart/data/`, per `research.md` §3).
 2. Replace the values for Cost, CPA, ROI confirmed, and Conversions (and, optionally, the
-   `roi_threshold` value) with your own — same shape as documented in
-   `contracts/chart-api.md`.
+   `roi_threshold` value) with your own — the file holds only numbers (dates, one array of values
+   per series, and the threshold value); colors/types/decimals are fixed in
+   `backend/chart/presentation.py` and don't need to be touched (`data-model.md`'s "Fixed Series
+   Presentation" note). The HTTP response shape a browser actually receives still matches
+   `contracts/chart-api.md` — the service fills in the fixed fields when building it.
 3. Run `make up` again.
 4. **Expected**: the running chart reflects the new data end-to-end, with no code changes, within
    the "clone to viewing your data" budget of under 10 minutes for a first-time reviewer (SC-004).

@@ -18,6 +18,13 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 
+from api import (
+    exceptions,  # noqa: F401  # registers @api.exception_handler(...) on api.ninja_app.api
+)
+from api.ninja_app import api
+from config.settings import config
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path(f"{config.API_PREFIX.strip('/')}/", api.urls),
 ]

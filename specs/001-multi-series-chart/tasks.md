@@ -37,10 +37,20 @@ TypeScript + Vite + ECharts, `node_modules`-managed), with `docker-compose.yml`,
 
 - [X] T001 Create the top-level `backend/` and `frontend/` directory skeletons per `plan.md`'s
       Project Structure (empty subdirectories: `backend/{config,project,api/{routers,schemas},domain,services,data,tests/{unit,contract,integration}}`,
-      `frontend/src/{config,api,types,components/MultiSeriesChart}`, `frontend/tests/{unit,integration}`)
+      `frontend/src/{config,api,types,components/MultiSeriesChart}`, `frontend/tests/{unit,integration}`).
+      **Superseded**: the backend skeleton was layer-first (`api/{routers,schemas}`, `domain/`,
+      `services/`, `data/`, `tests/` as top-level siblings); restructured domain-first into
+      `backend/chart/` (holding `types.py`/`dto.py`/`presentation.py`/`dataset_schema.py`/
+      `loader.py`/`exceptions.py`/`service.py`/`schemas.py`/`router.py`/`data/`/`tests/`) with
+      only `api/` (shared `NinjaAPI` +
+      exception-handler registration), `config/`, and `project/` staying outside it — see
+      research.md §11 and `plan.md`'s current Project Structure for the layout actually in place.
 - [X] T002 [P] Initialize the backend Poetry project in `backend/pyproject.toml` with
       `django`, `django-ninja`, `pydantic-settings` as dependencies and
-      `virtualenvs.in-project = true` (per constitution Principle II)
+      `virtualenvs.in-project = true` (per constitution Principle II). **Superseded**:
+      `pydantic-settings` was later removed (T011) once `Config` was rewritten as a plain class;
+      `pydantic` (used directly by `chart/dataset_schema.py`) and `python-dotenv` (used directly by
+      `BaseConfig`) are the actual current direct dependencies for this concern.
 - [X] T003 [P] Scaffold the Django project shell in `backend/project/settings.py`,
       `backend/project/urls.py`, `backend/project/asgi.py`, and `backend/manage.py`
       (minimal, unused SQLite `DATABASES` entry per `research.md` §3)
@@ -68,27 +78,63 @@ yet).
 **Purpose**: Infrastructure every user story needs. **No user story work starts before this phase
 is done.**
 
-- [X] T011 [P] Implement the single `Config` (`pydantic-settings` `BaseSettings`) in
-      `backend/config/settings.py` (API prefix, allowed CORS origins, dataset file path — no
-      `os.environ()` calls anywhere else in the backend)
+- [X] T011 [P] Implement the single config source in `backend/config/settings.py` (API prefix,
+      allowed CORS origins, dataset file path — no `os.environ()` calls anywhere else in the
+      backend). **Extended later, twice**: (1) `roi_threshold_above_color`/
+      `roi_threshold_at_or_below_color` and `log_level` added, initially as `pydantic-settings`
+      fields; (2) **superseded**: per user feedback, the whole class was rewritten from
+      `pydantic-settings` `BaseSettings` to a plain Python class, `BaseConfig` — reads `.env` via
+      `python-dotenv`'s `load_dotenv()` directly (called once at module import), `UPPER_CASE`
+      attributes (`SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `API_PREFIX`, `CORS_ALLOWED_ORIGINS`,
+      `DATASET_PATH`, `LOG_LEVEL`); the ROI threshold colors moved out entirely, to a *separate*
+      plain class, `PresentationConfig` in **new file `backend/config/presentation.py`**, alongside
+      the rest of the series presentation data — see the note under T015. `DEBUG` (default `False`)
+      and `ALLOWED_HOSTS` (default `["localhost", "127.0.0.1"]`) are new fields — `ALLOWED_HOSTS`
+      wasn't originally requested; adding `DEBUG` surfaced that Django refuses to boot with
+      `DEBUG=False` and an empty `ALLOWED_HOSTS` (the scaffold default), so it had to be
+      Config-sourced too (research.md §2). `pydantic-settings` was removed from `pyproject.toml`
+      (no longer used anywhere); `pydantic` itself was added as an explicit direct dependency
+      (already used directly by `chart/dataset_schema.py`, previously only transitive).
 - [X] T012 Wire `backend/project/settings.py` to import its values from
-      `config.settings.Config` rather than reading environment variables itself (depends on T011;
-      research.md §2)
+      `config.settings.config` (the `BaseConfig` singleton — class renamed from `Config`, see T011)
+      rather than reading environment variables itself (depends on T011; research.md §2).
+      **Extended later**: added a `LOGGING` dict sourcing its level from `config.LOG_LEVEL` (user
+      feedback — no logging existed anywhere; `api/exceptions.py`'s handlers now call
+      `logger.exception(exc)`); wired `DEBUG = config.DEBUG` and `ALLOWED_HOSTS = config.ALLOWED_HOSTS`
+      (previously `DEBUG = True`/`ALLOWED_HOSTS = []` hardcoded from the scaffold — see T011).
 - [X] T013 [P] Configure CORS in `backend/project/settings.py`, sourcing allowed origins from
       `Config` (depends on T012) — required from the first browser fetch onward, not just at
       deployment time
 - [X] T014 [P] Define the domain dataclasses `SeriesData`, `ChartDataset`, `ROIThresholdConfig` in
-      `backend/domain/models.py`, with the shared `SeriesKey` enum / `ChartType` literal factored
-      out into `backend/domain/types.py` (so the future `api/schemas/chart.py` shares one source of
-      truth instead of duplicating them), per `data-model.md` (no `pydantic`/`ninja` imports in
-      either file)
-- [ ] T015 [P] Create the seed dataset `backend/data/sample_dataset.json` (dates + all 4 series'
-      values + `roi_threshold`) matching the shape in `contracts/chart-api.md`
-- [ ] T016 Create the `NinjaAPI` instance and router-registration scaffold in
+      `backend/chart/dto.py`, with the shared `SeriesKey` enum / `ChartType` literal factored
+      out into `backend/chart/types.py` (so `chart/schemas.py` shares one source of truth instead
+      of duplicating them), per `data-model.md` (no `pydantic`/`ninja` imports in either file).
+      **Superseded file layout**: originally implemented under a top-level `backend/domain/`
+      folder; relocated into `backend/chart/` (a domain-first folder, not a technical-layer one) —
+      see research.md §11. **Superseded filename**: originally `models.py`; renamed to `dto.py` —
+      in Django, `models.py` conventionally means ORM models, and these are plain dataclasses, not
+      ORM models (user feedback).
+- [X] T015 [P] Create the seed dataset `backend/chart/data/sample_dataset.json` — simplified to
+      numbers-only (`dates`, one values array per series, `roi_threshold.value`), not the full
+      per-series-object shape from `contracts/chart-api.md` — because `name`/`chart_type`/`color`/
+      `decimals` and the two threshold colors are fixed, reference-matched constants, not reviewer
+      data; they now live in `backend/config/presentation.py`'s `PresentationConfig` (a plain
+      class, no `pydantic`, no `.env` — see research.md §3), with `backend/chart/presentation.py`
+      building the domain-typed `SERIES_METADATA` from it.
+      **Note for T023**: `chart/service.py` delegates to `chart/loader.py`'s
+      `load_chart_dataset()`, which validates this file via `chart/dataset_schema.py` (Pydantic)
+      before merging it with `SERIES_METADATA`/`ROI_THRESHOLD_*_COLOR` to build the
+      `SeriesData`/`ROIThresholdConfig` objects — see T023a/T023b below and research.md §12. The
+      HTTP response shape itself (`contracts/chart-api.md`) is unchanged.
+- [X] T016 Create the `NinjaAPI` instance and router-registration scaffold in
       `backend/api/ninja_app.py`, mounted from `backend/project/urls.py` (depends on T012)
-- [ ] T017 [P] Define the domain exception(s) (e.g. `ChartDataUnavailableError`) and register their
-      `@api.exception_handler(...)` mapping to HTTP responses in `backend/api/exceptions.py`
-      (depends on T016; research.md §5)
+- [X] T017 [P] Define the domain exception(s) — `ChartDataUnavailableError` and (added per
+      research.md §12) `InvalidDatasetError` — in `backend/chart/exceptions.py` (not
+      `api/exceptions.py` as originally written — the service/loader layer needs to raise these, so
+      the classes must live in the domain folder, not `api/`, to keep the dependency direction
+      correct; see research.md §5) and register their `@api.exception_handler(...)` mapping to HTTP
+      responses (`ChartDataUnavailableError` → `503`, `InvalidDatasetError` → `500`, both logged via
+      `logger.exception(exc)`) in `backend/api/exceptions.py` (depends on T016; research.md §5, §12)
 - [ ] T018 [P] Implement the frontend `Config` in `frontend/src/config/index.ts`, reading
       `import.meta.env.VITE_*` once (no other file reads `import.meta.env` directly)
 - [ ] T019 [P] Define the frontend DTO types (`SeriesDto`, `RoiThresholdDto`,
@@ -113,24 +159,45 @@ chart; confirm a loading indicator appears before data arrives.
 ### Tests for User Story 1
 
 - [ ] T021 [P] [US1] Contract test for `GET /chart-data` in
-      `backend/tests/contract/test_chart_endpoint.py`, asserting the response shape in
+      `backend/chart/tests/contract/test_chart_endpoint.py`, asserting the response shape in
       `contracts/chart-api.md` (dates/series/roi_threshold fields, 4-series invariant, `null`
       handling for missing values)
 - [ ] T022 [P] [US1] Unit test for `chart_service.get_chart_dataset()` in
-      `backend/tests/unit/test_chart_service.py`, asserting it loads `sample_dataset.json` into a
-      valid `ChartDataset` (dates ascending/unique, exactly 4 series, values aligned to dates)
+      `backend/chart/tests/unit/test_chart_service.py`, asserting it returns a valid `ChartDataset`
+      (dates ascending/unique, exactly 4 series, values aligned to dates) by loading the real
+      `sample_dataset.json` end-to-end through `chart/loader.py`
+- [ ] T022a [P] [US1] Unit test for `chart/loader.py`'s `load_chart_dataset()` in
+      `backend/chart/tests/unit/test_loader.py` — added per research.md §12: assert it raises
+      `InvalidDatasetError` on a mismatched-length series and on a missing `SeriesKey`, raises
+      `ChartDataUnavailableError` on a missing file, and correctly merges a valid file's raw values
+      with `chart/presentation.py`'s fixed metadata
 
 ### Implementation for User Story 1
 
-- [ ] T023 [US1] Implement `chart_service.get_chart_dataset()` in
-      `backend/services/chart_service.py`, loading `backend/data/sample_dataset.json` and building
-      a `ChartDataset` (depends on T014, T015)
+- [ ] T023a [P] [US1] Define `chart/dataset_schema.py` — added per research.md §12: a Pydantic
+      `RawDatasetFile` model validating the raw dataset file's shape (`dates` ascending/unique,
+      `series: dict[SeriesKey, list[float | None]]` with exactly the 4 keys and each list's length
+      matching `dates`, `roi_threshold.value`) — the one file in `chart/` besides `schemas.py` that
+      imports `pydantic`, kept separate from `schemas.py` since it validates a different boundary
+      (the file, not an HTTP request) with a different lifecycle (once at startup, not per request)
+- [ ] T023b [US1] Implement `chart/loader.py`'s `load_chart_dataset(path) -> ChartDataset` — added
+      per research.md §12: reads the file, validates via `chart/dataset_schema.py` (raising
+      `InvalidDatasetError` on failure, `ChartDataUnavailableError` if the file can't be read),
+      merges the validated raw values with `chart/presentation.py`'s `SERIES_METADATA`/
+      `ROI_THRESHOLD_*_COLOR`, builds a `ChartDataset` (depends on T014, T015, T017, T023a)
+- [ ] T023 [US1] Implement `chart_service.get_chart_dataset()` in `backend/chart/service.py` as a
+      thin wrapper delegating to `chart/loader.py`'s `load_chart_dataset(config.DATASET_PATH)` —
+      `service.py` itself imports no `pydantic`/`ninja` (depends on T023b)
 - [ ] T024 [P] [US1] Define the Pydantic boundary schemas (`ChartDataResponse`, `SeriesSchema`,
-      `ROIThresholdSchema`) in `backend/api/schemas/chart.py`, plus the dataclass↔schema mapping
+      `ROIThresholdSchema`) in `backend/chart/schemas.py`, plus the dataclass↔schema mapping
       functions (depends on T014)
-- [ ] T025 [US1] Implement the thin `GET /chart-data` router in `backend/api/routers/chart.py`:
-      calls `chart_service.get_chart_dataset()` once and returns the mapped schema, no business
-      logic, no `try/except` (depends on T023, T024, T016)
+- [ ] T025 [US1] Implement the thin `GET /chart-data` router in `backend/chart/router.py`:
+      calls `chart_service.get_chart_dataset()` and returns the mapped schema, no business logic,
+      no `try/except`; registered onto the shared `api` instance from `api/ninja_app.py`. **Also
+      calls `load_chart_dataset` once at module import time** (research.md §12) so a malformed
+      dataset file crashes `make up` immediately with a clear traceback, instead of surfacing as a
+      confusing `500`/`503` on the first browser request
+      (depends on T023, T024, T016)
 - [ ] T026 [P] [US1] Implement the frontend API client `fetchChartData()` in
       `frontend/src/api/chartApi.ts`, calling `${config.apiBaseUrl}/chart-data` and typing the
       result as `ChartDataResponseDto` (depends on T018, T019)
@@ -207,8 +274,8 @@ consistent color.
       threshold counted as at/below per spec Edge Cases) in `buildChartOption()` in
       `frontend/src/components/MultiSeriesChart/buildChartOption.ts` (depends on T027)
 - [ ] T038 [P] [US3] Add a second fixture whose `roi_confirmed` values never cross the threshold,
-      e.g. `backend/tests/fixtures/roi_no_crossing.json`, plus a backend unit test confirming the
-      service can serve it unchanged (depends on T023)
+      e.g. `backend/chart/tests/fixtures/roi_no_crossing.json`, plus a backend unit test confirming
+      the service can serve it unchanged (depends on T023)
 
 **Checkpoint**: All 3 chart-behavior user stories (US1–US3) work independently.
 
@@ -222,6 +289,13 @@ datasets, using only the README and one command.
 **Independent Test**: On a clean checkout, follow only the README to substitute the 4 datasets and
 run `make up`; confirm the chart reflects the new data end-to-end.
 
+**Deferred, not part of this phase**: a form/upload endpoint as an alternative to editing the file
+directly was discussed and explicitly deferred (research.md §12) — reopens the already-clarified
+"file-editing, no upload UI" decision for work outside what this assignment evaluates. If it's
+ever added, it reuses `chart/dataset_schema.py`'s `RawDatasetFile` as the new route's request-body
+type directly — Django Ninja returns `422` on invalid client input automatically, no new
+validation/exception code required.
+
 ### Implementation for User Story 4
 
 - [ ] T039 [US4] Finalize `docker-compose.yml` environment wiring: the frontend's
@@ -230,7 +304,7 @@ run `make up`; confirm the chart reflects the new data end-to-end.
 - [ ] T040 [US4] Finalize `Makefile` targets (`up` builds + starts both services; `down` stops them;
       `logs` tails both) at the repository root (depends on T008)
 - [ ] T041 [P] [US4] Write the root `README.md`: prerequisites, `make up`, and step-by-step
-      instructions for substituting the 4 datasets by editing `backend/data/sample_dataset.json`
+      instructions for substituting the 4 datasets by editing `backend/chart/data/sample_dataset.json`
       (mirrors `quickstart.md` Scenario 4), per FR-015
 - [ ] T042 [US4] Manually verify `quickstart.md`'s Setup and Scenario 4 end-to-end on a clean clone:
       `make up` from scratch, substitute the dataset, confirm the chart reflects it, and confirm no
@@ -248,7 +322,7 @@ run `make up`; confirm the chart reflects the new data end-to-end.
       validation
 - [ ] T044 [P] Add a root `.gitignore` (`.venv`/Poetry venv artifacts, `node_modules`, `__pycache__`,
       `dist`, `.env`)
-- [ ] T045 [P] Review `backend/api/routers/chart.py` and `backend/api/` for router thinness, zero
+- [ ] T045 [P] Review `backend/chart/router.py` and `backend/api/` for router thinness, zero
       `try/except`, and zero stray `os.environ()` usage (constitution Principles II, V)
 - [ ] T046 [P] Review `frontend/src/` for zero business logic (no client-side threshold/format
       computation — everything sourced from `ChartDataResponseDto`) (constitution Principle II)
@@ -282,7 +356,9 @@ run `make up`; confirm the chart reflects the new data end-to-end.
 - Setup: T002, T003, T004, T005, T006, T009, T010 can all run in parallel (distinct files).
 - Foundational: T011, T013 (after T012), T014, T015, T017 (after T016), T018, T019, T020 — the
   backend-side and frontend-side tracks are fully parallel with each other.
-- Within US1: T021/T022 (tests) in parallel; T024/T026 in parallel; T029/T030 (tests) in parallel.
+- Within US1: T021/T022 (tests) in parallel; T023a/T024 in parallel (distinct files, both depend
+  only on T014); T023b before T022a/T023 (loader must exist before it can be tested/wrapped);
+  T029/T030 (tests) in parallel.
 - Different user stories (US2, US3, US4) can be staffed in parallel once US1's Foundational output
   (`buildChartOption.ts` skeleton, the live endpoint) exists, since each touches a distinct concern
   within `buildChartOption.ts`/`MultiSeriesChart.tsx` or an entirely separate file (README, Compose).
@@ -293,11 +369,11 @@ run `make up`; confirm the chart reflects the new data end-to-end.
 
 ```bash
 # Tests, together:
-Task: "Contract test for GET /chart-data in backend/tests/contract/test_chart_endpoint.py"
-Task: "Unit test for chart_service.get_chart_dataset() in backend/tests/unit/test_chart_service.py"
+Task: "Contract test for GET /chart-data in backend/chart/tests/contract/test_chart_endpoint.py"
+Task: "Unit test for chart_service.get_chart_dataset() in backend/chart/tests/unit/test_chart_service.py"
 
 # Backend schema + frontend client, together (independent files):
-Task: "Define Pydantic schemas in backend/api/schemas/chart.py"
+Task: "Define Pydantic schemas in backend/chart/schemas.py"
 Task: "Implement fetchChartData() in frontend/src/api/chartApi.ts"
 ```
 

@@ -6,40 +6,70 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
 
 ## 1. Backend framework & versions
 
-- **Decision**: Python 3.12, Django 5.x, `django-ninja` 1.x (Pydantic v2-based), `pydantic-settings`
-  2.x, managed entirely through Poetry with `virtualenvs.in-project true`.
+- **Decision**: Python 3.12, Django 5.x, `django-ninja` 1.x (Pydantic v2-based), `python-dotenv`
+  1.x, managed entirely through Poetry with `virtualenvs.in-project true`.
 - **Rationale**: Django Ninja was specified by the user. Its 1.x line targets Pydantic v2, so
   Django 5.x (current LTS-adjacent stable at time of writing) is the compatible, actively
   maintained pairing. Python 3.12 is the current stable CPython series with full library support.
+  `pydantic-settings` was used initially for `Config` but was dropped (§2) once the user asked for
+  `Config` to be a plain Python class reading `.env` via `python-dotenv` directly, rather than a
+  `pydantic-settings` model — `pydantic` itself stays (used directly by `chart/dataset_schema.py`,
+  §12, and transitively by `django-ninja`).
 - **Alternatives considered**: FastAPI (rejected — user explicitly specified Django Ninja);
   Django REST Framework (rejected — heavier, serializer-centric, works against the
   Pydantic-at-the-boundary / dataclass-in-the-middle flow the user mandated).
 
 ## 2. Reconciling "no `os.environ()` in code" with Django's settings module
 
-- **Decision**: A single `pydantic-settings` `BaseSettings` class lives in `backend/config/`. It is
-  the only place environment variables are read. Django's own `settings.py` (required by the
-  framework) imports values **from** this `Config` instance rather than reading `os.environ`
-  itself — Django's settings module becomes a thin adapter, not a second source of configuration
-  truth.
+- **Decision**: A single class, `BaseConfig`, lives in `backend/config/settings.py`. It is the only
+  place environment variables are read. Django's own `settings.py` (required by the framework)
+  imports values **from** this class (via the `config = BaseConfig()` singleton) rather than
+  reading `os.environ` itself — Django's settings module becomes a thin adapter, not a second
+  source of configuration truth.
+- **Revised from `pydantic-settings` to a plain class**: `BaseConfig` was originally a
+  `pydantic-settings` `BaseSettings` model. User feedback: a pydantic object mixes a library into
+  every layer that touches `Config` for no benefit here, when a plain class reading `.env` via
+  `python-dotenv`'s `load_dotenv()` does the same job. `BaseConfig` now calls
+  `load_dotenv(ENV_FILE)` once at module import time, then each field is a class attribute computed
+  from `os.environ.get(...)` (or `os.environ[...]` for the one required field). Fields are named in
+  `UPPER_CASE` (`SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `API_PREFIX`, `CORS_ALLOWED_ORIGINS`,
+  `DATASET_PATH`, `LOG_LEVEL`) — idiomatic for a plain settings-holder class (and matches Django's
+  own `settings.py` convention), unlike the previous `snake_case` pydantic-model-field style.
 - **Rationale**: Satisfies the "single Config class, no magic env access scattered in code"
-  constraint while still giving Django the settings module it requires to boot.
-- **Alternatives considered**: `django-environ` (rejected — user explicitly asked for a
-  `pydantic-settings` `BaseSettings` class); reading `os.environ` directly in Django `settings.py`
-  (rejected — violates the stated constraint).
-- **Secrets specifically** (e.g. Django's `SECRET_KEY`): never hardcoded in source. `Config` reads
-  them from a `backend/.env` file (via `pydantic-settings`' `env_file` support, itself backed by
-  `python-dotenv` — an explicit direct dependency). `.env` is git-ignored (root `.gitignore`); a
-  committed `backend/.env.example` documents which variables must be set, with placeholder values.
-  A missing required secret fails loudly at startup (Pydantic validation error naming the missing
-  field) rather than silently falling back to a hardcoded default — verified by removing `.env` and
-  confirming `manage.py check` fails with `secret_key: Field required` instead of booting.
+  constraint while still giving Django the settings module it requires to boot. `os.environ`/
+  `load_dotenv` are used in exactly one place (inside `BaseConfig`), never scattered — that was
+  always the actual intent of "no `os.environ()` directly in code," not a ban on `os.environ`
+  existing anywhere at all.
+- **Alternatives considered**: `django-environ` (rejected — redundant with `python-dotenv`, already
+  a dependency); keeping `pydantic-settings` (rejected per user feedback above); reading
+  `os.environ` directly in Django `settings.py` (rejected — violates the stated constraint).
+- **Secrets specifically** (e.g. Django's `SECRET_KEY`): never hardcoded in source.
+  `BaseConfig.SECRET_KEY = os.environ["SECRET_KEY"]` — no default, so a missing `.env`/env var
+  raises `KeyError` immediately at import time (fail-fast; the error message is a bare `KeyError`
+  now rather than pydantic's more descriptive "Field required," a minor readability trade-off for
+  dropping the dependency). `.env` is git-ignored (root `.gitignore`); a committed
+  `backend/.env.example` documents which variables must be set, with placeholder values. Verified
+  by removing `.env` and confirming `manage.py check` fails with `KeyError: 'SECRET_KEY'` instead
+  of booting.
+- **`DEBUG` and `ALLOWED_HOSTS`**: `DEBUG` (default `False` — user-requested addition; previously
+  Django's scaffold default of `DEBUG = True` was left hardcoded in `project/settings.py` and never
+  wired to `Config` at all) and `ALLOWED_HOSTS` (default `["localhost", "127.0.0.1"]`, comma-
+  separated in `.env`) are both now `Config`-sourced. `ALLOWED_HOSTS` was *not* in the original
+  request — added after wiring `DEBUG = config.DEBUG` surfaced a real, previously-masked bug:
+  Django refuses to boot with `DEBUG = False` and an empty `ALLOWED_HOSTS` (`ALLOWED_HOSTS = []` was
+  the scaffold default, harmless only because `DEBUG` had always been hardcoded `True` before).
+  Caught via `make up` failing with `CommandError: You must set settings.ALLOWED_HOSTS if DEBUG is
+  False.` — fixed by Config-sourcing `ALLOWED_HOSTS` the same way as `CORS_ALLOWED_ORIGINS`, rather
+  than just hardcoding a fixed list in `project/settings.py`, for consistency.
+- **`roi_threshold_above_color`/`roi_threshold_at_or_below_color` are *not* on `BaseConfig`** —
+  moved to a separate plain class, `PresentationConfig` (§3), alongside the rest of the series
+  presentation data. `BaseConfig` only holds genuinely environment-varying settings.
 
 ## 3. Data storage for the 4 datasets
 
 - **Decision**: The 4 datasets (Cost, CPA, ROI confirmed, Conversions) plus the ROI threshold
-  configuration are stored as versioned, human-editable data files (JSON) under a dedicated
-  `backend/data/` directory, loaded by the service layer at request time (or process start).
+  configuration are stored as versioned, human-editable data files (JSON) under
+  `backend/chart/data/`, loaded by the service layer at request time (or process start).
   Django is configured with a minimal SQLite database only to satisfy the framework's boot
   requirement (`DATABASES` setting) — no application data is persisted there, and no
   models/migrations are needed for this feature.
@@ -52,13 +82,46 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
   and seeding steps that work against the "single command, <10 minutes" success criterion for no
   functional benefit in a 4-fixed-series, single-tenant tool); CSV (rejected — JSON maps more
   directly onto the nested per-series/per-date shape and needs no extra parsing dependency).
+- **What actually lives in the file vs. in code**: only numbers — `dates`, one values array per
+  series (keyed by `SeriesKey`), and `roi_threshold.value`. `name`/`chart_type`/`color`/`decimals`
+  per series, and the two threshold colors, are **not** in the file — they're a fixed constant
+  table (`SERIES_METADATA` + the two `ROI_THRESHOLD_*_COLOR` constants) in
+  `backend/chart/presentation.py`, which `chart/loader.py` (see §12) merges with the raw file
+  data. Originally these were embedded in the file per-series (matching the HTTP response shape
+  1:1); moved out once it became clear that would let a reviewer's dataset substitution silently
+  change the chart's colors — breaking Principle IV (reference fidelity) — and would force the
+  service to fall back to "if this key then this color" branching for any field a reviewer omitted.
+  A fixed dict lookup avoids both. This does **not** change `contracts/chart-api.md`'s response
+  shape at all — the HTTP layer still returns full per-series metadata; only the *source* of that
+  metadata moved from "file" to "code constant."
+- **Where exactly the fixed constants live, revised twice**: first draft put
+  `SERIES_METADATA`/`ROI_THRESHOLD_*_COLOR` as plain module constants directly in
+  `chart/presentation.py`, with the two ROI colors additionally read from `Config` (a
+  `pydantic-settings` model at the time). Final design, per user feedback: **all** of the raw
+  presentation data (`"Cost"`, `"area"`, `"#F5E1A4"`, ... — every series' name/chart_type/color/
+  decimals, plus both ROI threshold colors) lives as plain class-level constants on
+  `PresentationConfig` in a **new file, `backend/config/presentation.py`** — not `chart/`, and not
+  `pydantic`-anything, just a bare Python class (mirrors `BaseConfig`'s "no library mixed in for
+  pure constants" reasoning, §2). `chart/presentation.py` (still in `chart/`) then *builds* the
+  domain-typed `SERIES_METADATA: dict[SeriesKey, SeriesMetadata]` from
+  `PresentationConfig.SERIES_METADATA`'s raw string-keyed dict — `SeriesKey`/`SeriesMetadata`
+  themselves stay in `chart/` (they're domain types, `config/` has no business knowing about them).
+  `config/presentation.py` imports nothing from `chart/` — dependency direction stays
+  `chart` → `config`, never the reverse (verified by grep). `chart/loader.py` needed **no changes**
+  at all for this move — `chart/presentation.py` still exports the same
+  `SERIES_METADATA`/`ROI_THRESHOLD_ABOVE_COLOR`/`ROI_THRESHOLD_AT_OR_BELOW_COLOR` names.
+- **Why `PresentationConfig` is a plain class with class-level constants, not `.env`-driven**: none
+  of this data should ever be reviewer-editable (Principle IV, reference fidelity) — not even via an
+  optional `.env` override, which the ROI colors briefly had in an earlier draft. A bare class
+  attribute makes that permanent and explicit, and avoids `.env` needing to hold a JSON blob for
+  the nested per-series shape.
 
 ## 4. Layered request flow (Pydantic ↔ dataclass boundary)
 
-- **Decision**: `routers/chart.py` (Django Ninja `@router.get`) receives the request, calls exactly
-  one `services/chart_service.py` function, and returns its result. Any query-parameter validation
-  uses a Pydantic schema in `api/schemas/`; immediately after validation the router converts it to
-  a plain `dataclass` before calling the service. The service returns plain dataclasses
+- **Decision**: `chart/router.py` (Django Ninja `@router.get`) receives the request, calls exactly
+  one `chart/service.py` function, and returns its result. Any query-parameter validation
+  uses a Pydantic schema in `chart/schemas.py`; immediately after validation the router converts it
+  to a plain `dataclass` before calling the service. The service returns plain dataclasses
   (`ChartDataset`, `SeriesData`, `ROIThresholdConfig` — see `data-model.md`); the router converts
   that dataclass into the Pydantic response schema for serialization. The service layer imports
   nothing from `pydantic` or `ninja`.
@@ -67,24 +130,44 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
 - **Alternatives considered**: Passing Pydantic models straight into the service layer (rejected —
   explicitly disallowed by the user's instructions, and it would leak an HTTP-layer concern into
   business logic).
-- **Shared vocabulary vs. composite types**: `domain/` splits into `types.py` (the `SeriesKey` enum
-  and `ChartType` literal — framework-free value types) and `models.py` (the `SeriesData`/
-  `ChartDataset`/`ROIThresholdConfig` dataclasses that use them). Both `domain/models.py` and the
-  future `api/schemas/chart.py` import `SeriesKey`/`ChartType` from `domain/types.py`, so the two
-  layers can never drift into duplicate, independently-maintained copies of the same enum. This
-  stays consistent with "service layer imports nothing from pydantic/ninja" — `domain/types.py` has
-  no framework import either; it's the HTTP layer reaching *down* into domain vocabulary, not the
-  domain layer reaching up.
+- **Shared vocabulary vs. composite types**: within `chart/`, `types.py` (the `SeriesKey` enum
+  and `ChartType` literal — framework-free value types) is separate from `dto.py` (the
+  `SeriesData`/`ChartDataset`/`ROIThresholdConfig` dataclasses that use them — renamed from
+  `models.py`: in Django, `models.py` conventionally means ORM models, and ours aren't, which
+  invited confusion for any Django-familiar reviewer).
+  Both `chart/dto.py` and `chart/schemas.py` import `SeriesKey`/`ChartType` from `chart/types.py`,
+  so the two never drift into duplicate, independently-maintained copies of the same enum. This
+  stays consistent with "service layer imports nothing from pydantic/ninja" — `chart/types.py` has no framework
+  import either; it's `schemas.py` reaching *down* into domain vocabulary within the same domain
+  folder, not the reverse. See §11 for why this vocabulary lives inside `chart/` at all rather than
+  a separate top-level `domain/` folder.
 
 ## 5. Centralized error handling
 
-- **Decision**: Domain exceptions (e.g., `ChartDataUnavailableError`) are defined near the service
-  layer. A small number of `@api.exception_handler(...)` handlers, registered once where the Ninja
-  `NinjaAPI` instance is constructed, translate each domain exception type into the appropriate
-  HTTP status + error body. Routers never contain `try/except`.
+- **Decision**: Domain exceptions (`ChartDataUnavailableError`, `InvalidDatasetError` — see §12)
+  are defined in `chart/exceptions.py` — plain `Exception` subclasses, zero `pydantic`/`ninja`
+  imports. A small number of `@api.exception_handler(...)` handlers in `api/exceptions.py` import
+  those classes, `logger.exception(exc)` them, and translate each to the appropriate HTTP status +
+  error body (`ChartDataUnavailableError` → `503`, `InvalidDatasetError` → `500`; both bodies match
+  `contracts/chart-api.md`'s error shape). Routers never contain `try/except`.
 - **Rationale**: Matches the user's explicit requirement for one centralized translation point
   instead of per-router error handling, and keeps routers "maximally thin."
+- **File placement, revised from the original task text**: the exception *classes* live in
+  `chart/exceptions.py` (inside the domain, alongside `types.py`/`dto.py`), not
+  `api/exceptions.py` — the same reasoning as the `SeriesKey`/`ChartType` split (research.md #4):
+  `chart/loader.py` (§12) needs to raise these, and if the classes lived in `api/exceptions.py`
+  that would mean the domain importing *from* the shared HTTP composition root — the dependency
+  direction is supposed to run the other way (see §11). `api/exceptions.py` only imports the
+  classes from `chart/` and registers the HTTP mapping — `api/` depending on `chart/`, never the
+  reverse.
+- **Avoiding a circular import**: `api/ninja_app.py` (the `NinjaAPI` instance) does not import
+  `api/exceptions.py` — that would make `ninja_app` depend on `exceptions`, which depends on
+  `ninja_app` (for the `api` object to decorate), a cycle. Instead `project/urls.py` — Django's
+  natural one-time composition root — imports `api.exceptions` (for its `@api.exception_handler`
+  registration side effect) alongside mounting `api.urls`.
 - **Alternatives considered**: Per-router `try/except` blocks (rejected — explicitly disallowed).
+  Defining the exception class directly in `api/exceptions.py` as the original task text specified
+  (rejected once the service-layer import direction was considered — see above).
 
 ## 6. Frontend framework & charting library
 
@@ -164,3 +247,89 @@ to satisfy the spec's functional requirements with them, so Phase 1 design has n
   image build — `poetry install --no-root && ...` (backend) and `npm ci && ...` (frontend) — so a
   stale volume self-heals every `make up` instead of silently masking a missing dependency. Cheap
   when nothing changed, correct when something did.
+
+## 11. Domain-first backend structure (`chart/`, not a top-level `domain/`)
+
+- **Decision**: The backend is organized by *domain* first, *technical layer* second — the
+  opposite of the folder layout T011–T017 were originally built with (a top-level `domain/` sitting
+  alongside `api/`/`services/` as parallel technical-layer folders, each mixing whatever domains
+  existed inside it). Now there is one `chart/` folder — the project's single bounded context —
+  holding everything specific to it: `types.py`, `presentation.py`, `models.py`, `exceptions.py`,
+  `service.py`, `schemas.py`, `router.py`, `data/`, `tests/`. Only what is genuinely cross-domain
+  stays outside: `api/` (the shared `NinjaAPI` instance + exception-handler *registration* — a
+  second domain would plug into this same `api/`, not get its own copy), `config/` (the single
+  global `Config`), and `project/` (Django's own required framework shell).
+- **Rationale**: User feedback, directly: a `domain/` folder holding dataclasses/types/exceptions
+  for potentially-many domains, sitting apart from `api/routers/`, `api/schemas/`, and `services/`
+  which also each mix multiple domains together, is *layer-first* organization — you'd have to
+  touch four different top-level folders to see everything about "chart." *Domain-first* means one
+  folder answers "what does the chart domain consist of," and the layering rules the user
+  originally specified (thin router, Pydantic-only-at-boundary, dataclass-in-the-middle, no
+  `pydantic`/`ninja` in the service) still apply *inside* that folder — they were never about where
+  domains sit relative to each other, only about what each file is allowed to import.
+- **What stays outside a domain folder, and why**: anything that would need to exist even with
+  zero domains, or that a second domain would share rather than duplicate. `api/ninja_app.py` (the
+  one `NinjaAPI` instance every domain's router mounts onto) and `api/exceptions.py` (the one place
+  handler registration happens, importing each domain's exception classes) are exactly that — this
+  directly resolves the "the handler feels like it belongs a level above domain" observation: it
+  does, because it is the thing every domain plugs into, not something any single domain owns.
+- **Alternatives considered**: Keeping `domain/`/`services/`/`api/routers/`/`api/schemas/` as
+  top-level technical-layer folders (rejected — the original approach; works fine with exactly one
+  domain but doesn't scale and buries "everything about chart" across four locations). A single
+  flat `chart/` with no internal file split at all, e.g. one `models.py` holding types + dataclasses
+  + exceptions (rejected — loses the single-responsibility-per-file granularity the user separately
+  asked for when types.py was split out of models.py; domain-first and single-purpose files are not
+  in tension, this project just needed both corrected).
+
+## 12. Validating the substitutable dataset file
+
+- **Decision**: The raw dataset file is validated with Pydantic at the point it's loaded — a new
+  `chart/dataset_schema.py` (`RawDatasetFile`: `dates`, `series: dict[SeriesKey, list[float | None]]`,
+  `roi_threshold.value`, plus a `model_validator` enforcing ascending/unique dates, exactly the 4
+  `SeriesKey`s present, and every series' value-list length matching `len(dates)`). A new
+  `chart/loader.py`'s `load_chart_dataset(path) -> ChartDataset` reads the file, validates it via
+  that model, merges the validated raw values with `chart/presentation.py`'s fixed metadata, and
+  builds the `chart/dto.py` objects. On a validation failure it raises `InvalidDatasetError`; on a
+  missing/unreadable file it raises `ChartDataUnavailableError` — these are now two distinct
+  problems ("data present but wrong" vs. "data source unavailable"), previously conflated (there
+  was no validation at all before this).
+- **Rationale**: There was no validation of the dataset file. Any malformed reviewer edit would
+  either go unhandled or get muddled into the `503` meant for "temporarily unavailable" — the wrong
+  signal for "this data is permanently wrong until someone fixes the file." The user explicitly
+  asked for Pydantic-based validation here, reusable if a non-file input method is ever added.
+- **Where the Pydantic import boundary actually is**: the original rule ("service layer imports
+  nothing from pydantic/ninja") is preserved by keeping this validation in `chart/loader.py`, not
+  `chart/service.py` — `chart/service.py` (T023) stays a thin wrapper that calls the loader and
+  never itself imports `pydantic`. The *boundary* this Pydantic model validates is redefined
+  slightly from "HTTP request/response only" to "any external, less-trusted input" — the
+  substitutable file counts, since a reviewer edits it by hand. `chart/schemas.py` (HTTP
+  request/response shaping) and `chart/dataset_schema.py` (raw file/input shaping) are kept as two
+  separate files despite both being Pydantic, since they validate different things with different
+  lifecycles (once at startup vs. per HTTP request).
+- **Status codes — three, not one**: `503` (`ChartDataUnavailableError`) stays reserved for genuine
+  runtime unavailability (the file disappears *after* a successful startup — unlikely for static
+  data, but the handler exists defensively). `500` (`InvalidDatasetError`) means "the server's own
+  data is broken" — a deployment/config problem, not the caller's fault. Neither of these is a
+  `4xx`, correctly — no client caused them. If a client-facing input path is ever added (see below),
+  a genuinely bad *client* submission must **not** collapse into either of these — it needs a `4xx`.
+- **Fail fast at startup, not per-request**: `chart/router.py` (T025) is expected to call
+  `load_chart_dataset` once at import time (module level), so a malformed file crashes the
+  container immediately when `make up` runs, with a clear traceback identifying the exact problem
+  (e.g. "series 'cost' has 4 values but expected 5") — not a confusing `500`/`503` on the first
+  browser request, long after the reviewer has moved on and forgotten they edited the file.
+- **Deferred: a form/upload endpoint instead of file-editing**: discussed and explicitly deferred —
+  it would reopen the already-clarified User Story 4 decision (file-editing, no upload UI) for work
+  that isn't part of what this assignment evaluates. No `Config` toggle field was added for this
+  (e.g. a `Literal["file", "form"]` with only one working branch) — an unused branch is exactly the
+  half-finished-abstraction problem to avoid (YAGNI). Instead, the validation was designed so this
+  would be a thin addition later, with zero duplicated validation logic: a future Ninja route would
+  declare `RawDatasetFile` as its request body's type directly, and Django Ninja would automatically
+  return `422 Unprocessable Entity` for a malformed *client* submission — its own built-in behavior,
+  entirely separate from `ChartDataUnavailableError`/`InvalidDatasetError`, and requiring no new
+  exception-handling code at all.
+- **Alternatives considered**: Validating with hand-written `if`/`raise` checks instead of Pydantic
+  (rejected — user explicitly asked for Pydantic here, and a declarative model reads more clearly
+  than a wall of manual assertions for a reviewer). Putting the raw-file validation model in
+  `chart/schemas.py` alongside the HTTP schemas (rejected — different boundary, different lifecycle;
+  keeping them separate makes it obvious at a glance which one governs a per-request HTTP body vs.
+  a once-at-startup file read). Building the form endpoint now (rejected — see "Deferred" above).

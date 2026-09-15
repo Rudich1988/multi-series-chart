@@ -1,7 +1,7 @@
 # Contract: Chart Data API
 
-One combined REST endpoint (per the Q1 clarification), owned by `api/routers/chart.py`, backed by
-`services/chart_service.py`. This is the **only** endpoint the frontend calls to render the chart.
+One combined REST endpoint (per the Q1 clarification), owned by `chart/router.py`, backed by
+`chart/service.py`. This is the **only** endpoint the frontend calls to render the chart.
 
 ## `GET /api/chart-data`
 
@@ -79,10 +79,16 @@ dataset (the one currently active in the backend-side data source, per research.
   in `above_color`; values `<=` this are rendered in `at_or_below_color` (spec Edge Cases: exactly
   on the threshold counts as at/below).
 
-### Response `503/502` (backend data source unavailable) or `500` (unexpected failure)
+### Response `503` (backend data source unavailable) or `500` (dataset misconfigured)
 
 `Content-Type: application/json`, produced by a centralized `@api.exception_handler` (research.md
-#5), never by a router-level `try/except`.
+§5, §12), never by a router-level `try/except`. Two distinct causes, two distinct codes:
+
+- `503` — `ChartDataUnavailableError`: the dataset file is missing/unreadable. Reserved for genuine
+  runtime unavailability; in practice rare, since a malformed-or-missing file is meant to fail
+  `make up` at startup (research.md §12) before any request can reach this path.
+- `500` — `InvalidDatasetError`: the dataset file exists but fails validation (wrong shape, length
+  mismatch, missing series). A server-side data problem, not the caller's fault.
 
 ```jsonc
 {
@@ -92,6 +98,20 @@ dataset (the one currently active in the backend-side data source, per research.
   }
 }
 ```
+```jsonc
+{
+  "error": {
+    "code": "INVALID_DATASET",
+    "message": "Chart data is misconfigured."
+  }
+}
+```
+
+Neither of these is a `4xx` — no client caused them. If a client-facing input path is ever added
+(e.g. submitting a dataset via a form/POST — not part of this feature, see research.md §12), a
+malformed *client* submission must map to `422 Unprocessable Entity`, which Django Ninja produces
+automatically when a route's body is typed as `chart/dataset_schema.py`'s `RawDatasetFile` —
+entirely separate from the two error paths above.
 
 The frontend maps any non-2xx response (or a network failure) to the error/empty state required by
 FR-013. A `200` is never returned for a failure case — the frontend does not need to inspect the

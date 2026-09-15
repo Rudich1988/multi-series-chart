@@ -23,8 +23,8 @@ together with `make up`.
 (backend); React 18 + Vite 5 + Apache ECharts (frontend)
 
 **Storage**: No database used for feature data. Backend-side versioned JSON data files under
-`backend/data/` are the substitutable data source (research.md §3); Django is configured with a
-minimal unused SQLite database purely to satisfy the framework's boot requirement.
+`backend/chart/data/` are the substitutable data source (research.md §3); Django is configured
+with a minimal unused SQLite database purely to satisfy the framework's boot requirement.
 
 **Testing**: `pytest` + `pytest-django` + Django Ninja `TestClient` (backend, run via Poetry/in
 container); `vitest` + `@testing-library/react` (frontend, run via `node_modules`/in container)
@@ -42,7 +42,7 @@ Poetry in-project venv only, frontend deps via local `node_modules` only, no glo
 frontend performs no business logic/computation (FR-002, FR-011); single `make up` command starts
 the whole stack (FR-014); ROI threshold and per-series color/type/decimals metadata are
 backend-owned, never hardcoded in the frontend; no secret/confidential value (e.g. Django's
-`SECRET_KEY`) is ever hardcoded in source — such values are read by the `Config` class from a
+`SECRET_KEY`) is ever hardcoded in source — such values are read by `BaseConfig` from a
 git-ignored `.env` file (`backend/.env`, documented via a committed `backend/.env.example`), per
 research.md §2.
 
@@ -92,31 +92,53 @@ backend/
 ├── pyproject.toml            # Poetry, virtualenvs.in-project = true
 ├── poetry.lock
 ├── manage.py
-├── config/                   # single Config source (pydantic-settings BaseSettings)
+├── config/                   # single source for env-varying settings — plain classes, no pydantic
 │   ├── __init__.py
-│   └── settings.py           # e.g. Config(BaseSettings): api_base_prefix, data_dir, cors_origins...
+│   ├── settings.py           # BaseConfig: plain class, reads .env via load_dotenv() once;
+│   │                          # SECRET_KEY, DEBUG, ALLOWED_HOSTS, API_PREFIX, CORS_ALLOWED_ORIGINS,
+│   │                          # DATASET_PATH, LOG_LEVEL — UPPER_CASE class attributes
+│   └── presentation.py       # PresentationConfig: plain class, hardcoded series names/chart-types/
+│                              # colors/decimals + ROI threshold colors — NOT .env-driven (never
+│                              # reviewer-editable); config/ has zero imports from chart/
 ├── project/                  # Django project shell (framework-required)
-│   ├── settings.py           # imports values FROM config.settings.Config, not os.environ
-│   ├── urls.py
+│   ├── settings.py           # imports values FROM config.settings.config (BaseConfig instance),
+│   │                          # not os.environ directly
+│   ├── urls.py               # mounts api.urls; imports api.exceptions for its registration side effect
 │   └── asgi.py
-├── api/                      # HTTP boundary
-│   ├── ninja_app.py          # NinjaAPI instance + router registration + exception handlers wired here
-│   ├── routers/
-│   │   └── chart.py          # GET /chart-data — thin: parse -> call service -> return
-│   ├── schemas/
-│   │   └── chart.py          # Pydantic request/response schemas (boundary-only)
-│   └── exceptions.py         # domain exception -> HTTP response mapping (@api.exception_handler)
-├── domain/
-│   ├── types.py               # SeriesKey enum, ChartType literal — framework-free vocabulary shared by domain/models.py and api/schemas/chart.py
-│   └── models.py              # dataclasses: SeriesData, ChartDataset, ROIThresholdConfig
-├── services/
-│   └── chart_service.py      # business logic: load data source, build ChartDataset; no pydantic/ninja imports
-├── data/
-│   └── sample_dataset.json   # substitutable dataset — the file User Story 4 documents editing
-└── tests/
-    ├── unit/                 # services/, domain/
-    ├── contract/             # api/routers/ against contracts/chart-api.md
-    └── integration/          # end-to-end request -> response
+├── api/                      # shared HTTP composition root — NOT domain-specific; this is where a
+│   │                          # second domain's router/exceptions would also get wired in, if one existed
+│   ├── ninja_app.py          # the one NinjaAPI instance, shared across all domains
+│   └── exceptions.py         # imports each domain's exception classes (e.g. chart.exceptions),
+│                              # registers @api.exception_handler(...) mapping each to an HTTP response —
+│                              # the exception *class* is NOT defined here, only the HTTP-mapping wiring
+└── chart/                    # the "chart" domain — everything specific to it lives together, not
+    │                          # spread across technical layers (routers/schemas/services/dto each own folder)
+    ├── types.py               # SeriesKey enum, ChartType literal — framework-free vocabulary
+    ├── presentation.py        # SERIES_METADATA + ROI_THRESHOLD_*_COLOR — fixed, reference-matched
+    │                          # colors/types/decimals, NOT read from the dataset file (data-model.md);
+    │                          # the ROI threshold colors specifically come from config.settings.config
+    ├── dto.py                  # dataclasses: SeriesData, ChartDataset, ROIThresholdConfig — named
+    │                          # dto.py, not models.py, to avoid Django's ORM-models connotation
+    ├── dataset_schema.py       # Pydantic: RawDatasetFile — validates the raw dataset file's shape
+    │                          # (research.md §12); the one place chart/ imports pydantic outside schemas.py
+    ├── loader.py               # load_chart_dataset(path): read file -> validate via dataset_schema.py
+    │                          # -> merge with presentation.py -> build dto.py objects
+    ├── exceptions.py           # ChartDataUnavailableError, InvalidDatasetError — plain Exception
+    │                          # subclasses, no pydantic/ninja import, so loader.py/service.py can
+    │                          # raise them without depending on api/
+    ├── service.py              # business logic: thin wrapper calling loader.load_chart_dataset;
+    │                          # no pydantic/ninja imports
+    ├── schemas.py               # Pydantic request/response schemas (boundary-only)
+    ├── router.py                # GET /chart-data — thin: parse -> call service -> return; registered
+    │                          # onto the shared `api` instance from api/ninja_app.py; calls
+    │                          # load_chart_dataset once at import time so a malformed dataset file
+    │                          # fails `make up` immediately instead of failing on first request
+    ├── data/
+    │   └── sample_dataset.json  # substitutable dataset — the file User Story 4 documents editing
+    └── tests/
+        ├── unit/                # service.py, loader.py, dto.py
+        ├── contract/            # router.py against contracts/chart-api.md
+        └── integration/         # end-to-end request -> response
 
 frontend/
 ├── Dockerfile
@@ -147,12 +169,24 @@ README.md                      # setup, data-substitution, and run instructions 
 ```
 
 **Structure Decision**: Option 2 (web application: separate `backend/` and `frontend/`), per the
-constitution's independent-containers requirement and the user's explicit instruction. Backend
-follows the layered/DDD split requested (`api/` boundary → `domain/` dataclasses → `services/`
-business logic, with `config/` isolated from Django's own required `project/settings.py`).
-Frontend isolates all environment-driven configuration in `src/config/` and keeps ECharts
-option-building (`buildChartOption.ts`) separate from the React component shell, so the
-mapping-from-API-DTO-to-chart-option logic is independently testable.
+constitution's independent-containers requirement and the user's explicit instruction. Backend is
+organized **domain-first, not layer-first**: `chart/` is the one bounded context this project has,
+and everything specific to it — types/enums, dataclasses, fixed presentation constants, the
+exception class, the service, the Pydantic schemas, and the router — lives together inside
+`chart/`, rather than being scattered across technical-layer folders (`routers/`, `schemas/`,
+`services/`, `models/`) that would each mix multiple domains together if this project ever grew a
+second one. Only what is genuinely cross-domain/global stays outside `chart/`: `api/` (the shared
+`NinjaAPI` instance and the exception-handler *registration*, which a second domain would also
+plug into), `config/` (the single `Config` source), and `project/` (Django's own required
+framework shell). Within `chart/`, the layering the user originally specified is still enforced —
+`router.py` stays thin, `schemas.py` (HTTP) and `dataset_schema.py` (raw dataset file) are the only
+two files that import Pydantic, and `service.py`/`dto.py`/`exceptions.py` know nothing about
+Pydantic/HTTP (`loader.py` sits between them: it validates the file via `dataset_schema.py` so
+`service.py` never has to) — it's just that "layer" is now the organizing principle *inside* a
+domain folder, not *instead of* one. Frontend isolates all
+environment-driven configuration in `src/config/` and keeps ECharts option-building
+(`buildChartOption.ts`) separate from the React component shell, so the mapping-from-API-DTO-to-
+chart-option logic is independently testable.
 
 ## Complexity Tracking
 

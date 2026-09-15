@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
 
-from .types import ChartType, SeriesKey
+from chart.types import ChartType, SeriesKey
 
 
 @dataclass(frozen=True)
