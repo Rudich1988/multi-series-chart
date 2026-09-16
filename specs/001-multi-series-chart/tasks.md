@@ -303,13 +303,13 @@ chart; confirm a loading indicator appears before data arrives.
       (`10, 12, 18, 11, 10`px, ~2-3.7% of chart height, all pure blue, values' relative variation
       clearly preserved), not a screenshot judgment call. **Fourth revision** (research.md §16.1) —
       bars were also visibly wider than the reference's; measured the reference's bar-to-band-width
-      ratio (`~25%`, up from our default `~67%`) and set `barWidth: '25%'` explicitly. Also (§16.4)
-      gave the ROI confirmed spline a bolder constant `lineStyle: { width: 3 }` — investigated a
-      user report of it looking "thicker when not hovering, thinner when hovering" by checking
-      multiple reference frames directly and found the apparent thickness change tracks the curve's
-      *slope* (steep vs. flat), present simultaneously in a single frame regardless of where the
-      current hover point is, not an actual hover-triggered style toggle — so no emphasis-based
-      width change was added, just a bolder constant width.
+      ratio (`~25%`, up from our default `~67%`) and set `barWidth: '25%'` explicitly. **Fifth
+      revision** (research.md §16.4) — the ROI confirmed spline first got only a bolder constant
+      `lineStyle: { width: 3 }` (a hover-triggered "thicker at rest, thinner on hover" report was
+      investigated against the reference stills and concluded to be a slope-illusion, not a real
+      toggle); the user then re-confirmed the request directly after seeing the live result, so
+      implemented it as asked: `lineStyle: { width: 4 }` normally, `emphasis: { lineStyle: {
+      width: 1.5 } }` on hover.
 - [X] T028 [US1] Implement `MultiSeriesChart.tsx` in
       `frontend/src/components/MultiSeriesChart/MultiSeriesChart.tsx`: fetches via `chartApi`,
       shows a loading indicator while in flight (FR-013a), shows an error state on failure
@@ -410,7 +410,18 @@ enter/leave, and correct in-bounds positioning near the first/last date.
       ECharts' automatic "highlight every series at the hovered index" dispatch too, not just the
       tooltip content — so it never lit up at all. Root-caused via an isolated live repro, not by
       reading docs; removed once `buildTooltipFormatter`'s own index-based filter was confirmed
-      sufficient to keep halo data out of the tooltip text on its own.
+      sufficient to keep halo data out of the tooltip text on its own. **Second revision**
+      (research.md §16.5, user pixel-level report: hovered markers showed a colored center with
+      only a pale ring, the reverse of the intended white-fill/colored-border) — pixel-sampled the
+      live render and found the marker's border was correctly white/colored but its *fill* was
+      exactly a 70/30 blend of white and the halo's own color: the halo (added after its real
+      marker in the `series` array, so higher default `z`) was painting its semi-transparent fill
+      *over* the marker, but apparently not over its border stroke (zrender seems to batch fills
+      and strokes as separate passes — not documented anywhere obvious, found by ruling out
+      `silent`, multiple y-axes, `axisPointer`, animation/`stateAnimation` timing one at a time in
+      isolated repros first). Fixed with explicit `z` on both sides: real point-emphasis series get
+      `z: 3`, `buildHaloSeries` gets `z: 1`, unconditionally placing the halo behind. Verified the
+      marker center now samples as exact `(255, 255, 255)`.
 - [X] T034 [US2] Configure tooltip fade duration (~100–150ms) and in-bounds
       repositioning near the axis edges (FR-008, FR-009) in `buildChartOption.ts` /
       `MultiSeriesChart.tsx` (depends on T032). Both are single `tooltip` option fields, so both

@@ -47,6 +47,13 @@ function buildHaloSeries(series: SeriesDto, yAxisIndex: number) {
     showSymbol: false,
     symbol: 'circle',
     symbolSize: 34,
+    // Below the real marker's own `z` (3) — found via pixel-sampling the rendered marker, not by
+    // reasoning about draw order: without this, the halo's semi-transparent fill painted *over*
+    // the real marker's opaque white fill (even though the halo series comes later in the array,
+    // and even though the marker's own border stroke correctly stayed on top — zrender appears to
+    // batch fills and strokes in separate passes), tinting the marker's center a blended pastel
+    // instead of leaving it solid white. Explicit `z` forces the halo behind regardless.
+    z: 1,
     lineStyle: { opacity: 0 },
     itemStyle: { opacity: 0 },
     emphasis: {
@@ -119,6 +126,8 @@ function toEChartsSeries(series: SeriesDto, yAxisIndex: number) {
       showSymbol: false,
       symbol: 'circle',
       symbolSize: 10,
+      // Above the halo's `z` (1) — see `buildHaloSeries` for why this matters.
+      z: 3,
       emphasis: buildPointEmphasis(series.color),
     },
     // `barMinHeight`: guarantees even the smallest value still renders as a visible sliver,
@@ -146,24 +155,26 @@ function toEChartsSeries(series: SeriesDto, yAxisIndex: number) {
       showSymbol: false,
       symbol: 'diamond',
       symbolSize: 10,
-      // Bolder base stroke to match the reference's visual weight. The reference's line looks
-      // *thinner* near the flat dip and *thicker* on the steep declining/rising segments within
-      // the very same (single) hovered frame — i.e. simultaneously, in one screenshot, not
-      // toggling with hover state. That's the ordinary visual effect of a constant-width stroke
-      // on a curve whose slope varies (a steep segment's vertical cross-section is wider than a
-      // flat segment's, for the same perpendicular stroke width) — confirmed by checking a frame
-      // hovering the steep top (frame_04.png, 10.06 date): the steep part right at the hover
-      // point is still the "thick"-looking one, so thickness tracks slope, not hover state. No
-      // hover-triggered lineStyle change implemented; a bolder constant width reproduces the same
-      // apparent effect on its own.
-      lineStyle: { width: 3 },
-      emphasis: buildPointEmphasis(series.color),
+      // Above the halo's `z` (1) — see `buildHaloSeries` for why this matters.
+      z: 3,
+      // Bolder normally, thinner on hover, per explicit user direction. (An earlier pass
+      // concluded the reference's apparent thick/thin variation was just a rendering artifact of
+      // a constant-width stroke on a curve of varying slope, not a real hover-triggered change,
+      // and left this alone — but the user re-confirmed the behavior after seeing it live, so
+      // implemented directly rather than re-arguing the point from stills.)
+      lineStyle: { width: 4 },
+      emphasis: {
+        ...buildPointEmphasis(series.color),
+        lineStyle: { width: 1.5 },
+      },
     },
     line: {
       ...base,
       type: 'line',
       symbol: 'rect',
       symbolSize: 8,
+      // Above the halo's `z` (1) — see `buildHaloSeries` for why this matters.
+      z: 3,
       emphasis: buildPointEmphasis(series.color),
     },
   }

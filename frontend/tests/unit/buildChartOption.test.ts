@@ -57,6 +57,7 @@ interface TestSeries {
   itemStyle?: { opacity?: number }
   yAxisIndex: number
   data: (number | null)[]
+  z?: number
   emphasis?: {
     itemStyle?: {
       color?: string
@@ -64,6 +65,7 @@ interface TestSeries {
       borderWidth?: number
       shadowColor?: string
     }
+    lineStyle?: { width?: number }
   }
 }
 
@@ -165,6 +167,28 @@ describe('buildChartOption', () => {
       expect(halo.itemStyle).toEqual(expect.objectContaining({ opacity: 0 }))
       expect(halo.emphasis?.itemStyle?.color).toBe(expectedColors[i])
     })
+  })
+
+  it('stacks each real marker above its own halo (z-order), so the halo cannot tint it', () => {
+    const option = buildChartOption(sampleData)
+    const allSeries = option.series as unknown as TestSeries[]
+    const [cost, , roi, conversions] = realSeries(option)
+    const haloSeries = allSeries.slice(REAL_SERIES_COUNT)
+
+    for (const marker of [cost, roi, conversions]) {
+      for (const halo of haloSeries) {
+        expect(marker.z ?? 0).toBeGreaterThan(halo.z ?? 0)
+      }
+    }
+  })
+
+  it('makes the ROI confirmed line thinner on hover than at rest', () => {
+    const option = buildChartOption(sampleData)
+    const [, , roi] = realSeries(option)
+
+    expect(roi.lineStyle?.width).toBeGreaterThan(
+      roi.emphasis?.lineStyle?.width ?? Infinity,
+    )
   })
 })
 

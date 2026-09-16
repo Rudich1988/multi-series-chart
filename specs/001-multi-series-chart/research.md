@@ -647,23 +647,47 @@ item, a live isolated repro rather than by inspection alone:
     receives the automatic highlight dispatch like any other series, and its `emphasis` circle
     shows up in sync with its real counterpart for free.
 
-### 16.4 Investigated and *not* implemented: "thicker line when not hovering, thinner when hovering"
+### 16.4 ROI confirmed line: thicker at rest, thinner on hover — revised to implement it directly
 
 - **User observation**: the ROI confirmed line looked thicker in general and thinner specifically
   where the mouse was hovering, comparing screenshots.
-- **Checked directly rather than assumed**: zoomed into multiple reference frames. In `frame_12.png`
-  (hovering the flat dip), the steep declining segment *above* the hover point is visibly thicker
-  than the flatter segment *at* the hover point — looks consistent with the user's report in
-  isolation. But `frame_04.png` (hovering the *steep* segment near `10.06`, the top of the decline)
-  shows the same pattern: the steep segment right at *that* hover point is still the thick-looking
-  one, and the flatter segment far away from the hover point is still thin. Since the "thick" and
-  "thin" segments appear together, simultaneously, in a single frame regardless of *where* the
-  current hover point is, this can't be a hover-triggered style toggle (`emphasis.lineStyle` is a
-  whole-series override — if it were real, the *entire* line would change together, not just the
-  segment near the hover point). It's the ordinary visual effect of a constant-width stroke on a
-  curve whose slope varies: a steep segment's vertical cross-section at a given `x` is wider than a
-  flat segment's, for the exact same perpendicular stroke width.
-- **What changed instead**: gave the ROI confirmed line a bolder constant `lineStyle: { width: 3 }`
-  (no hover-based width change) — closer to the reference's overall visual weight, and the same
-  slope-dependent apparent thickness variation the user noticed will show up on its own, for free,
-  because it's a real rendering property of any constant-width stroke, not something to special-case.
+- **First pass — investigated, concluded it was an illusion**: zoomed into multiple reference
+  frames. In `frame_12.png` (hovering the flat dip), the steep declining segment *above* the hover
+  point looked thicker than the flatter segment *at* the hover point. But `frame_04.png` (hovering
+  the *steep* segment near `10.06`) showed the same pattern: the steep part right at *that* hover
+  point was still the thick-looking one. Since "thick" and "thin" segments appeared together in a
+  single frame regardless of where the hover point was, concluded it couldn't be a real
+  hover-triggered toggle (`emphasis.lineStyle` is a whole-series override, so a real toggle would
+  change the *entire* line, not just one segment) and left it as a bolder constant width only.
+- **User re-confirmed the request after seeing the live result** ("при ненаведении зелёная линия
+  должна быть жирнее! а при наведении — наоборот. ты посмотри ещё раз"), stated as a direct
+  instruction rather than a fresh observation to re-litigate. Implemented as asked rather than
+  re-arguing the stills-based analysis: `lineStyle: { width: 4 }` normally,
+  `emphasis: { lineStyle: { width: 1.5 } }` on hover. The slope-dependent visual effect from the
+  first pass isn't wrong as an *explanation of the reference frames* — it just isn't what the user
+  wants implemented here regardless.
+
+### 16.5 The "white" marker wasn't actually turning white — halo painted over it, found by pixel math
+
+- **User report**: "у фиолетовой при наведении снаружи белый, а внутри фиолетовый... а у зелёной —
+  белый ромб снаружи и зелёный внутри" — describing the *opposite* of what §16.2 intended (white
+  fill, colored border): a colored center with only a paler ring around it.
+- **Measurement, not assumption**: sampled the rendered marker's pixels directly. The outer ring
+  was the exact, unblended series color (e.g. `(176, 37, 199)`, matching `#B026C7` at full
+  saturation) — consistent with the border rendering correctly. The center was `(231, 189, 238)` —
+  computed by hand as a linear blend and found to be *exactly* `0.7 × white + 0.3 × (176, 38, 199)`
+  (matches to within rounding on all 3 channels) — i.e., the marker's own white fill was real, but
+  something 30%-opacity and series-colored was painted over it afterward. That "something" is
+  obviously the halo (`buildHaloSeries`'s `emphasis.itemStyle.opacity: 0.3`).
+- **Why the border wasn't also tinted, which is what took the longest to explain**: verified with
+  an isolated repro that a halo series appended *after* its real marker in the `series` array (thus
+  higher default `z`) does *not* uniformly cover the marker — only its fill, not its border stroke.
+  This points at zrender (ECharts' renderer) batching fills and strokes as separate passes rather
+  than compositing each symbol as one atomic draw; not documented anywhere obvious, found by
+  process of elimination (ruled out `silent`, multiple y-axes, `axisPointer`, animation timing,
+  `stateAnimation` duration — none of those reproduced or fixed it — before landing on z-order).
+- **Fix**: explicit `z` on both sides of the pairing — real point-emphasis series (`area`/`spline`/
+  `line`) get `z: 3`, `buildHaloSeries` gets `z: 1` — so the halo is unambiguously behind the marker
+  regardless of array position or default per-type z. Verified after the fix: the marker's center
+  samples as exact `(255, 255, 255)`, no tint, at multiple wait times (300ms–5s, ruling out this
+  ever having been a slow transition that would've resolved on its own).
