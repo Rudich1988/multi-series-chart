@@ -3,6 +3,9 @@ specs/reference/
 .env
 !.env.example
 
+# Editor/IDE
+.idea/
+
 # Backend (Poetry-managed, in-project venv)
 .venv/
 __pycache__/
