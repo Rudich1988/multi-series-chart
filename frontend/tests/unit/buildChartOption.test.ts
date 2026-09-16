@@ -50,33 +50,56 @@ interface TestSeries {
   areaStyle?: unknown
   smooth?: boolean
   symbol?: string
+  symbolSize?: number
   color?: string
+  barWidth?: string
+  lineStyle?: { width?: number; opacity?: number }
+  itemStyle?: { opacity?: number }
   yAxisIndex: number
   data: (number | null)[]
+  emphasis?: {
+    itemStyle?: {
+      color?: string
+      borderColor?: string
+      borderWidth?: number
+      shadowColor?: string
+    }
+  }
+}
+
+// Real series (one per DTO entry, in order) come first in `option.series`; halo companion
+// series (see `buildHaloSeries`) are appended after, one per non-bar real series.
+const REAL_SERIES_COUNT = sampleData.series.length
+
+function realSeries(option: ReturnType<typeof buildChartOption>): TestSeries[] {
+  return (option.series as unknown as TestSeries[]).slice(0, REAL_SERIES_COUNT)
 }
 
 describe('buildChartOption', () => {
-  it('maps each series to the correct ECharts series type', () => {
+  it('maps each real series to the correct ECharts series type and marker shape', () => {
     const option = buildChartOption(sampleData)
-    const series = option.series as unknown as TestSeries[]
+    const series = realSeries(option)
 
     expect(series).toHaveLength(4)
 
     expect(series[0].type).toBe('line')
     expect(series[0].areaStyle).toBeDefined()
+    expect(series[0].symbol).toBe('circle')
 
     expect(series[1].type).toBe('bar')
+    expect(series[1].barWidth).toBe('25%')
 
     expect(series[2].type).toBe('line')
     expect(series[2].smooth).toBe(true)
+    expect(series[2].symbol).toBe('diamond')
 
     expect(series[3].type).toBe('line')
     expect(series[3].symbol).toBe('rect')
   })
 
-  it('assigns each series its own color, matching the DTO', () => {
+  it('assigns each real series its own color, matching the DTO', () => {
     const option = buildChartOption(sampleData)
-    const series = option.series as unknown as TestSeries[]
+    const series = realSeries(option)
 
     expect(series.map((s) => s.color)).toEqual([
       '#F5E1A4',
@@ -86,10 +109,10 @@ describe('buildChartOption', () => {
     ])
   })
 
-  it('gives every series its own y-axis for independent scaling', () => {
+  it('gives every real series its own y-axis for independent scaling', () => {
     const option = buildChartOption(sampleData)
     const yAxis = option.yAxis as unknown[]
-    const series = option.series as unknown as TestSeries[]
+    const series = realSeries(option)
 
     expect(yAxis).toHaveLength(4)
     expect(new Set(series.map((s) => s.yAxisIndex)).size).toBe(4)
@@ -102,7 +125,7 @@ describe('buildChartOption', () => {
     expect(xAxis.data).toEqual(sampleData.dates)
   })
 
-  it('passes each series values through unchanged, including nulls', () => {
+  it('passes each real series values through unchanged, including nulls', () => {
     const withGap: ChartDataResponseDto = {
       ...sampleData,
       series: sampleData.series.map((s, i) =>
@@ -111,9 +134,37 @@ describe('buildChartOption', () => {
     }
 
     const option = buildChartOption(withGap)
-    const series = option.series as unknown as TestSeries[]
+    const series = realSeries(option)
 
     expect(series[0].data).toEqual([null, 25.85])
+  })
+
+  it('turns the hovered point white with a colored border on area/spline/line, not a tint', () => {
+    const option = buildChartOption(sampleData)
+    const [cost, , roi, conversions] = realSeries(option)
+
+    for (const series of [cost, roi, conversions]) {
+      expect(series.emphasis?.itemStyle?.color).toBe('#fff')
+      expect(series.emphasis?.itemStyle?.borderColor).toBe(series.color)
+    }
+  })
+
+  it('adds one invisible-until-hovered circular halo series per non-bar series', () => {
+    const option = buildChartOption(sampleData)
+    const allSeries = option.series as unknown as TestSeries[]
+    const haloSeries = allSeries.slice(REAL_SERIES_COUNT)
+
+    // cost, roi_confirmed, conversions get a halo; cpa (bar) doesn't.
+    const expectedColors = sampleData.series
+      .filter((s) => s.chartType !== 'bar')
+      .map((s) => s.color)
+
+    expect(haloSeries).toHaveLength(3)
+    haloSeries.forEach((halo, i) => {
+      expect(halo.symbol).toBe('circle')
+      expect(halo.itemStyle).toEqual(expect.objectContaining({ opacity: 0 }))
+      expect(halo.emphasis?.itemStyle?.color).toBe(expectedColors[i])
+    })
   })
 })
 

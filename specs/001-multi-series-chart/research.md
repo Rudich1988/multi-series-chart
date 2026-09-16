@@ -575,3 +575,95 @@ verification method.
   `buildChartOption()` — not an attempt at a pixel-exact match (the reference GIF's original
   capture resolution/DPI is unknown, so an exact px figure isn't recoverable), but enough to make
   the box read as comparably substantial rather than cramped.
+
+## 16. Bar width, per-series hover marker styling, and a real ECharts gotcha (halo not lighting up)
+
+User feedback, all addressed by pixel-measuring/zooming into `specs/reference/frames/` and, for one
+item, a live isolated repro rather than by inspection alone:
+
+### 16.1 Bar width
+
+- **Measurement**: `frame_21.png`'s 5 CPA bars are `~29-30px` wide inside a `~118.5px` category
+  band (center-to-center distance) — `~25%`. ECharts' default `barWidth` (unset, auto-computed from
+  `barCategoryGap`) measured at `~67%` of the band on this chart — visibly "fatter" than the
+  reference. Set `barWidth: '25%'` on the bar series explicitly. Re-measured after: `47-48px` bars
+  in a `~199.6px` band (`~24%`) — matches.
+
+### 16.2 Hovered-point marker: crisp white+border shape, not a tinted/scaled blob
+
+- **Measurement**: zoomed into `frame_08.png` and `frame_12.png` around the hovered point on each
+  series. The marker itself is small, fully opaque, **white-filled with a colored border** — not
+  translucent or enlarged. A separate, distinctly *circular*, low-opacity halo sits behind/around
+  it, regardless of the marker's own shape:
+  - Cost: plain circle marker.
+  - ROI confirmed: **diamond** marker (not circle) — only visible on hover, matching its line
+    having no persistent marker otherwise.
+  - Conversions: its always-visible square marker turns white+bordered *only at the hovered index*;
+    every other square along the line stays solid-filled.
+- **Fix**: split what was one `emphasis` config (scale + translucent color + `shadowBlur`, from
+  T033/§7) into two purposes:
+  - `buildPointEmphasis(color)` — the real marker's emphasis: `itemStyle: { color: '#fff',
+    borderColor: color, borderWidth: 2 }`, applied to `area`/`spline`/`line` series (not `bar`,
+    which keeps its own translucent-glow emphasis from T033 — a bar doesn't have a "point" to turn
+    into a small bordered shape, the reference just brightens the bar itself).
+  - A **separate halo series** per non-bar real series (`buildHaloSeries`, §16.3) for the circular
+    glow, since `shadowBlur` on the real marker would blur *that marker's own silhouette* (a
+    diamond-shaped blur, a square-shaped blur) — the reference's halo is a plain circle regardless
+    of the marker shape underneath.
+- Symbols set explicitly per type so there's something well-defined to switch to on emphasis
+  (`showSymbol: false` still hides them normally, exactly as established in T033): `area` →
+  `circle`, `spline` → `diamond`, `line` keeps its existing always-visible `rect`.
+
+### 16.3 The halo silently never lit up — traced to `tooltip: { show: false }` on the halo series
+
+- **Design**: `buildHaloSeries(series, yAxisIndex)` adds one companion `line` series per non-bar
+  real series — same `data`/`yAxisIndex` as its real counterpart, fully invisible normally
+  (`showSymbol: false`, `itemStyle: { opacity: 0 }`, `lineStyle: { opacity: 0 }`), with a large
+  (`symbolSize: 34`), low-opacity (`0.3`), same-color circle only in its `emphasis` state.
+  `silent: true` keeps it out of its own mouse handling. Real series come first in the combined
+  `series` array, halo series appended after — `buildRoiVisualMap`'s `seriesIndex` and
+  `buildTooltipFormatter`'s `series[point.seriesIndex]` lookup both only ever address the *real*
+  first `N` entries, so the formatter explicitly filters out any `seriesIndex >= series.length`
+  (a halo) rather than relying on an ECharts-level "exclude from tooltip" option — see why below.
+- **First version rendered nothing for the halo at all** — no error, no visible circle, verified by
+  pixel-scanning a screenshot around every hovered point and finding zero color deviation from the
+  plain background. Root-caused via a live, isolated repro (Playwright driving a direct `import()`
+  of the app's bundled `echarts`, iterating on a minimal 1-real + 1-halo-series option) rather than
+  by reading ECharts' docs and guessing:
+  - Ruled out, each confirmed still working in isolation: `silent: true` on the halo, multiple
+    independent y-axes, a non-zero `yAxisIndex` on the halo, `axisPointer: { type: 'none' }`, real
+    mouse-driven hover vs. manually dispatching a `highlight` action.
+  - Found by isolating the one remaining difference from a working minimal repro: the halo series
+    also had `tooltip: { show: false }` (added defensively, to keep it out of the tooltip content,
+    which `buildTooltipFormatter`'s index filter already handles on its own). Reproduced with a
+    2-series minimal option, toggling only that one field: with `tooltip.show: false`, hovering
+    stops including that series in ECharts' default tooltip content *and* the series never enters
+    the automatic "highlight every series at the hovered axis index" state that `trigger: 'axis'`
+    normally dispatches to every series — so its `emphasis` config never activates, ever. This
+    isn't documented anywhere obvious; found purely by bisecting a live reproduction.
+  - **Fix**: removed `tooltip: { show: false }` from `buildHaloSeries` entirely. The manual
+    `seriesIndex`-based filter in `buildTooltipFormatter` was already sufficient to keep halo data
+    out of the rendered tooltip text, so nothing else needed to change — the halo series now
+    receives the automatic highlight dispatch like any other series, and its `emphasis` circle
+    shows up in sync with its real counterpart for free.
+
+### 16.4 Investigated and *not* implemented: "thicker line when not hovering, thinner when hovering"
+
+- **User observation**: the ROI confirmed line looked thicker in general and thinner specifically
+  where the mouse was hovering, comparing screenshots.
+- **Checked directly rather than assumed**: zoomed into multiple reference frames. In `frame_12.png`
+  (hovering the flat dip), the steep declining segment *above* the hover point is visibly thicker
+  than the flatter segment *at* the hover point — looks consistent with the user's report in
+  isolation. But `frame_04.png` (hovering the *steep* segment near `10.06`, the top of the decline)
+  shows the same pattern: the steep segment right at *that* hover point is still the thick-looking
+  one, and the flatter segment far away from the hover point is still thin. Since the "thick" and
+  "thin" segments appear together, simultaneously, in a single frame regardless of *where* the
+  current hover point is, this can't be a hover-triggered style toggle (`emphasis.lineStyle` is a
+  whole-series override — if it were real, the *entire* line would change together, not just the
+  segment near the hover point). It's the ordinary visual effect of a constant-width stroke on a
+  curve whose slope varies: a steep segment's vertical cross-section at a given `x` is wider than a
+  flat segment's, for the exact same perpendicular stroke width.
+- **What changed instead**: gave the ROI confirmed line a bolder constant `lineStyle: { width: 3 }`
+  (no hover-based width change) — closer to the reference's overall visual weight, and the same
+  slope-dependent apparent thickness variation the user noticed will show up on its own, for free,
+  because it's a real rendering property of any constant-width stroke, not something to special-case.

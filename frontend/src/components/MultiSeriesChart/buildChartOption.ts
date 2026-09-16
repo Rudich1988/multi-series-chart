@@ -9,18 +9,49 @@ import type {
 } from '../../types/chart'
 import { formatTooltip, type TooltipSeriesValue } from './tooltipFormatter'
 
-// Soft glow in the series' own color, scaled up on hover — the "halo" from the reference
-// (specs/reference/frames/frame_10.png etc.), applied uniformly so all 4 series (including bar/
-// area, which have no persistent point marker) highlight the same way at the hovered X (FR-006).
-function buildEmphasis(color: string) {
+// The hovered point on area/spline/line turns into a small, crisp, white-filled marker with a
+// colored border — found by zooming into specs/reference/frames/frame_08.png and frame_12.png:
+// the marker itself is NOT tinted/translucent, only the separate halo behind it is (see
+// `buildHaloSeries`). Per-type symbol shape also comes straight from those crops: Cost gets a
+// plain circle, ROI confirmed a diamond, Conversions keeps its always-visible square.
+function buildPointEmphasis(color: string) {
   return {
-    scale: 2.5,
     itemStyle: {
-      color,
-      opacity: 0.35,
-      borderWidth: 0,
-      shadowBlur: 20,
-      shadowColor: color,
+      color: '#fff',
+      borderColor: color,
+      borderWidth: 2,
+    },
+  }
+}
+
+// Soft, separate circular halo behind the point marker — a companion series sharing the real
+// series' data/axis, invisible in the normal state and only shown (as a big, low-opacity circle)
+// on emphasis. A halo is a SEPARATE series, not just `shadowBlur` on the real marker, because
+// `shadowBlur` follows the marker's own silhouette (diamond-shaped blur for a diamond marker,
+// square-shaped for a square) — the reference's halo is a plain circle regardless of the marker's
+// shape underneath it (confirmed in the same crops as `buildPointEmphasis`). `silent: true` keeps
+// it out of its own mouse/click handling; `buildTooltipFormatter` filters it out of the tooltip
+// content by index, deliberately *not* `tooltip: { show: false }` here — found via a live,
+// isolated repro (not by reasoning about the docs) that `tooltip.show: false` on a series doesn't
+// just drop it from the tooltip text, it also opts that series out of ECharts' automatic
+// "highlight every series at the hovered axis index" dispatch, so the halo never emphasized at
+// all with it set. Without it, the halo still lights up in sync with its real series for free,
+// exactly because that automatic cross-series highlight dispatch reaches every series that
+// doesn't opt out.
+function buildHaloSeries(series: SeriesDto, yAxisIndex: number) {
+  return {
+    type: 'line',
+    yAxisIndex,
+    data: series.values,
+    silent: true,
+    showSymbol: false,
+    symbol: 'circle',
+    symbolSize: 34,
+    lineStyle: { opacity: 0 },
+    itemStyle: { opacity: 0 },
+    emphasis: {
+      lineStyle: { opacity: 0 },
+      itemStyle: { color: series.color, opacity: 0.3, borderWidth: 0 },
     },
   }
 }
@@ -39,9 +70,8 @@ function buildEmphasis(color: string) {
 // so a bar series stays visibly subdued relative to whatever the line/area/spline series' own
 // magnitudes happen to be, while the bar's own relative variation (its min vs. max) is fully
 // preserved and visible. `barMinHeight` (in `toEChartsSeries`) is a floor so a value can't ever
-// round down to literally 0px. Not an exact reference pixel match (research.md §15.2 — the GIF's
-// original capture resolution isn't recoverable) but the qualitative target — small, subdued,
-// still legibly different bar-to-bar — is.
+// round down to literally 0px. Calibrated by measuring the live render against a stated pixel
+// target (research.md §15.1.2), not by eye.
 const BAR_HEADROOM = 25
 
 function buildYAxis(series: SeriesDto) {
@@ -55,20 +85,42 @@ function buildYAxis(series: SeriesDto) {
   return { type: 'value', scale: true, show: false }
 }
 
+// Bar emphasis stays a translucent glow directly on the bar itself (no separate halo series —
+// unlike a point marker, the bar's own rectangle already reads as "the shape being highlighted").
+function buildBarEmphasis(color: string) {
+  return {
+    scale: 2.5,
+    itemStyle: {
+      color,
+      opacity: 0.35,
+      borderWidth: 0,
+      shadowBlur: 20,
+      shadowColor: color,
+    },
+  }
+}
+
 function toEChartsSeries(series: SeriesDto, yAxisIndex: number) {
   const base = {
     name: series.name,
     yAxisIndex,
     data: series.values,
     color: series.color,
-    emphasis: buildEmphasis(series.color),
   }
 
   // area/spline hide their symbol normally (`showSymbol: false`) but ECharts still shows the
   // emphasis-state symbol at the hovered index, which is exactly how the reference GIF renders
-  // their halo — a point that only appears on hover, not permanently on the line.
+  // a point that only appears on hover, not permanently on the line.
   const byChartType: Record<ChartType, object> = {
-    area: { ...base, type: 'line', areaStyle: {}, showSymbol: false },
+    area: {
+      ...base,
+      type: 'line',
+      areaStyle: {},
+      showSymbol: false,
+      symbol: 'circle',
+      symbolSize: 10,
+      emphasis: buildPointEmphasis(series.color),
+    },
     // `barMinHeight`: guarantees even the smallest value still renders as a visible sliver,
     // instead of rounding down to 0px against BAR_HEADROOM's compressed scale. `z: 10` (default
     // is 2): found via pixel-measuring the live render, not by eye — ECharts was drawing `area`'s
@@ -76,9 +128,44 @@ function toEChartsSeries(series: SeriesDto, yAxisIndex: number) {
     // series array, blending the bar into a dull gray smear instead of showing it as a crisp blue
     // rectangle (confirmed by computing the exact alpha-blend: `cost`'s fill color over the bar's
     // blue reproduces the measured color almost exactly). A higher `z` forces the bar back on top.
-    bar: { ...base, type: 'bar', barMinHeight: 2, z: 10 },
-    spline: { ...base, type: 'line', smooth: true, showSymbol: false },
-    line: { ...base, type: 'line', symbol: 'rect', symbolSize: 8 },
+    // `barWidth`: measured the reference's actual bar footprint vs. its category band
+    // (frame_21.png: ~30px bar in a ~118px band, ≈25%) — ECharts' default is much wider (~67% of
+    // the band in this chart), which read as "too fat" compared to the reference's slim bars.
+    bar: {
+      ...base,
+      type: 'bar',
+      barMinHeight: 2,
+      barWidth: '25%',
+      z: 10,
+      emphasis: buildBarEmphasis(series.color),
+    },
+    spline: {
+      ...base,
+      type: 'line',
+      smooth: true,
+      showSymbol: false,
+      symbol: 'diamond',
+      symbolSize: 10,
+      // Bolder base stroke to match the reference's visual weight. The reference's line looks
+      // *thinner* near the flat dip and *thicker* on the steep declining/rising segments within
+      // the very same (single) hovered frame — i.e. simultaneously, in one screenshot, not
+      // toggling with hover state. That's the ordinary visual effect of a constant-width stroke
+      // on a curve whose slope varies (a steep segment's vertical cross-section is wider than a
+      // flat segment's, for the same perpendicular stroke width) — confirmed by checking a frame
+      // hovering the steep top (frame_04.png, 10.06 date): the steep part right at the hover
+      // point is still the "thick"-looking one, so thickness tracks slope, not hover state. No
+      // hover-triggered lineStyle change implemented; a bolder constant width reproduces the same
+      // apparent effect on its own.
+      lineStyle: { width: 3 },
+      emphasis: buildPointEmphasis(series.color),
+    },
+    line: {
+      ...base,
+      type: 'line',
+      symbol: 'rect',
+      symbolSize: 8,
+      emphasis: buildPointEmphasis(series.color),
+    },
   }
 
   return byChartType[series.chartType]
@@ -98,6 +185,10 @@ function toEChartsSeries(series: SeriesDto, yAxisIndex: number) {
 // no other options involved. Bounding both pieces to comfortably cover the actual data range
 // sidesteps the bug while remaining functionally identical (every value is within [min, max] by
 // construction, so nothing can fall outside either piece).
+//
+// `seriesIndex` here refers to the *real* series' position in `buildChartOption`'s combined
+// `series` array. Real series are placed first (indices `0..data.series.length-1`), halo
+// companion series after — so this index is the same whether or not halos exist.
 function buildRoiVisualMap(data: ChartDataResponseDto) {
   const roiIndex = data.series.findIndex(
     (series) => series.key === 'roi_confirmed',
@@ -123,14 +214,20 @@ function buildRoiVisualMap(data: ChartDataResponseDto) {
 }
 
 // `trigger: 'axis'` calls this with one CallbackDataParams per series at the hovered date, in
-// no guaranteed order — matched back to `series` by `seriesIndex` rather than array position.
+// no guaranteed order. Matched back to `series` (the DTO array, real series only) by
+// `seriesIndex` rather than array position; halo companion series (indices >= `series.length`
+// in the actual ECharts option) are filtered out here rather than excluded via an ECharts-level
+// option, since `series[point.seriesIndex]` would otherwise resolve to `undefined` for them.
 function buildTooltipFormatter(series: SeriesDto[]) {
   return (raw: TooltipComponentFormatterCallbackParams): string => {
     const points = Array.isArray(raw) ? raw : [raw]
     if (points.length === 0) return ''
 
     const rows: TooltipSeriesValue[] = points
-      .filter((point) => point.seriesIndex !== undefined)
+      .filter(
+        (point) =>
+          point.seriesIndex !== undefined && point.seriesIndex < series.length,
+      )
       .map((point) => {
         const matched = series[point.seriesIndex as number]
         return {
@@ -146,6 +243,14 @@ function buildTooltipFormatter(series: SeriesDto[]) {
 }
 
 export function buildChartOption(data: ChartDataResponseDto): EChartsOption {
+  const realSeries = data.series.map((series, index) =>
+    toEChartsSeries(series, index),
+  )
+  const haloSeries = data.series
+    .map((series, index) => ({ series, index }))
+    .filter(({ series }) => series.chartType !== 'bar')
+    .map(({ series, index }) => buildHaloSeries(series, index))
+
   return {
     grid: { left: 8, right: 8, top: 8, bottom: 8 },
     xAxis: {
@@ -154,7 +259,7 @@ export function buildChartOption(data: ChartDataResponseDto): EChartsOption {
       show: false,
     },
     yAxis: data.series.map(buildYAxis),
-    series: data.series.map((series, index) => toEChartsSeries(series, index)),
+    series: [...realSeries, ...haloSeries],
     tooltip: {
       trigger: 'axis',
       // The reference has no persistent vertical guide line — only the tooltip + per-series

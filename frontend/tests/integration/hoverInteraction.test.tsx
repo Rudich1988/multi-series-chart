@@ -81,7 +81,15 @@ const sampleResponse = {
 interface FakeOption {
   series: {
     color?: string
-    emphasis?: { itemStyle?: { shadowColor?: string } }
+    symbol?: string
+    itemStyle?: { opacity?: number }
+    emphasis?: {
+      itemStyle?: {
+        color?: string
+        borderColor?: string
+        shadowColor?: string
+      }
+    }
   }[]
   tooltip: {
     confine?: boolean
@@ -134,12 +142,28 @@ describe('hover interaction (tooltip + halo configuration)', () => {
     expect(html).toContain('no data')
   })
 
-  it('configures a soft, same-color halo (emphasis) for all 4 series', async () => {
+  it('turns the hovered point white-bordered on area/spline/line and glows the bar', async () => {
     const option = await renderAndCaptureOption()
+    const [cost, cpa, roi, conversions] = option.series
 
-    expect(option.series).toHaveLength(4)
-    for (const series of option.series) {
-      expect(series.emphasis?.itemStyle?.shadowColor).toBe(series.color)
+    for (const series of [cost, roi, conversions]) {
+      expect(series.emphasis?.itemStyle?.color).toBe('#fff')
+      expect(series.emphasis?.itemStyle?.borderColor).toBe(series.color)
+    }
+    expect(cpa.emphasis?.itemStyle?.shadowColor).toBe(cpa.color)
+  })
+
+  it('adds an invisible-until-hovered circular halo series for each non-bar series', async () => {
+    const option = await renderAndCaptureOption()
+    // 4 real series (cost, cpa, roi_confirmed, conversions) + 3 halo series (all but the bar).
+    const haloSeries = option.series.slice(4)
+
+    expect(option.series).toHaveLength(7)
+    expect(haloSeries).toHaveLength(3)
+    for (const halo of haloSeries) {
+      expect(halo.symbol).toBe('circle')
+      expect(halo.itemStyle?.opacity).toBe(0)
+      expect(halo.emphasis?.itemStyle?.color).toBeTruthy()
     }
   })
 

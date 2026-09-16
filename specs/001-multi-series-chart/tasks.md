@@ -301,7 +301,15 @@ chart; confirm a loading indicator appears before data arrives.
       Fixed the layering with `z: 10` on the bar series (default `z` is `2`), and recalibrated to
       `BAR_HEADROOM = 25` — this time chosen and confirmed against an actual pixel measurement
       (`10, 12, 18, 11, 10`px, ~2-3.7% of chart height, all pure blue, values' relative variation
-      clearly preserved), not a screenshot judgment call.
+      clearly preserved), not a screenshot judgment call. **Fourth revision** (research.md §16.1) —
+      bars were also visibly wider than the reference's; measured the reference's bar-to-band-width
+      ratio (`~25%`, up from our default `~67%`) and set `barWidth: '25%'` explicitly. Also (§16.4)
+      gave the ROI confirmed spline a bolder constant `lineStyle: { width: 3 }` — investigated a
+      user report of it looking "thicker when not hovering, thinner when hovering" by checking
+      multiple reference frames directly and found the apparent thickness change tracks the curve's
+      *slope* (steep vs. flat), present simultaneously in a single frame regardless of where the
+      current hover point is, not an actual hover-triggered style toggle — so no emphasis-based
+      width change was added, just a bolder constant width.
 - [X] T028 [US1] Implement `MultiSeriesChart.tsx` in
       `frontend/src/components/MultiSeriesChart/MultiSeriesChart.tsx`: fetches via `chartApi`,
       shows a loading indicator while in flight (FR-013a), shows an error state on failure
@@ -390,6 +398,19 @@ enter/leave, and correct in-bounds positioning near the first/last date.
       from `symbol: 'none'` to `showSymbol: false`, since `'none'` suppresses the emphasis-state
       symbol too — with `showSymbol: false` the point only appears on hover, matching the
       reference exactly (permanently-visible markers only on the `line` series, per T027).
+      **Revised** (research.md §16.2/§16.3, user: pixel-level review of the hovered marker/halo
+      appearance) — the single shared `buildEmphasis` blob (translucent, scaled, `shadowBlur`
+      glow) didn't match the reference's actual look: a crisp white-filled, colored-border marker
+      (per-type shape: circle/diamond/the existing square) plus a *separate*, always-circular,
+      low-opacity halo behind it. Split into `buildPointEmphasis` (the marker, for
+      area/spline/line) and a new companion `buildHaloSeries` per non-bar real series (`bar` keeps
+      the original translucent-glow treatment, since a bar has no "point" to turn into a bordered
+      shape). Along the way, found and fixed a real ECharts gotcha with no visible error: the halo
+      series' `tooltip: { show: false }` (added as a defensive extra) silently opted it out of
+      ECharts' automatic "highlight every series at the hovered index" dispatch too, not just the
+      tooltip content — so it never lit up at all. Root-caused via an isolated live repro, not by
+      reading docs; removed once `buildTooltipFormatter`'s own index-based filter was confirmed
+      sufficient to keep halo data out of the tooltip text on its own.
 - [X] T034 [US2] Configure tooltip fade duration (~100–150ms) and in-bounds
       repositioning near the axis edges (FR-008, FR-009) in `buildChartOption.ts` /
       `MultiSeriesChart.tsx` (depends on T032). Both are single `tooltip` option fields, so both
