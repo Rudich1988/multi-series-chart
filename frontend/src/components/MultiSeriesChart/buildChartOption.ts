@@ -9,16 +9,16 @@ import type {
 } from '../../types/chart'
 import { formatTooltip, type TooltipSeriesValue } from './tooltipFormatter'
 
-// The hovered point on area/spline/line turns into a small, crisp, white-filled marker with a
-// colored border — found by zooming into specs/reference/frames/frame_08.png and frame_12.png:
-// the marker itself is NOT tinted/translucent, only the separate halo behind it is (see
-// `buildHaloSeries`). Per-type symbol shape also comes straight from those crops: Cost gets a
-// plain circle, ROI confirmed a diamond, Conversions keeps its always-visible square.
+// The hovered point on area/spline/line turns into a small, crisp marker with a white border and
+// a fill in the series' own color — per user correction, swapped from an earlier (wrong) reading
+// of the reference crops. The marker itself is NOT tinted/translucent — only the separate halo
+// behind it is (see `buildHaloSeries`). Per-type symbol shape: Cost gets a plain circle, ROI
+// confirmed a diamond, Conversions keeps its always-visible square.
 function buildPointEmphasis(color: string) {
   return {
     itemStyle: {
-      color: '#fff',
-      borderColor: color,
+      color,
+      borderColor: '#fff',
       borderWidth: 2,
     },
   }

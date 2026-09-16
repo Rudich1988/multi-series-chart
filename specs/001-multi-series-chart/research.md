@@ -602,10 +602,13 @@ item, a live isolated repro rather than by inspection alone:
     every other square along the line stays solid-filled.
 - **Fix**: split what was one `emphasis` config (scale + translucent color + `shadowBlur`, from
   T033/§7) into two purposes:
-  - `buildPointEmphasis(color)` — the real marker's emphasis: `itemStyle: { color: '#fff',
-    borderColor: color, borderWidth: 2 }`, applied to `area`/`spline`/`line` series (not `bar`,
-    which keeps its own translucent-glow emphasis from T033 — a bar doesn't have a "point" to turn
-    into a small bordered shape, the reference just brightens the bar itself).
+  - `buildPointEmphasis(color)` — the real marker's emphasis, applied to `area`/`spline`/`line`
+    series (not `bar`, which keeps its own translucent-glow emphasis from T033 — a bar doesn't
+    have a "point" to turn into a small bordered shape, the reference just brightens the bar
+    itself). **Colors corrected per direct user feedback** (§16.6) — initially implemented as
+    `itemStyle: { color: '#fff', borderColor: color }` (white fill, colored border) from reading
+    the crops; the user pointed out live that it's the other way around: `itemStyle: { color,
+    borderColor: '#fff' }` — filled in the series' own color, white border.
   - A **separate halo series** per non-bar real series (`buildHaloSeries`, §16.3) for the circular
     glow, since `shadowBlur` on the real marker would blur *that marker's own silhouette* (a
     diamond-shaped blur, a square-shaped blur) — the reference's halo is a plain circle regardless
@@ -691,3 +694,15 @@ item, a live isolated repro rather than by inspection alone:
   regardless of array position or default per-type z. Verified after the fix: the marker's center
   samples as exact `(255, 255, 255)`, no tint, at multiple wait times (300ms–5s, ruling out this
   ever having been a slow transition that would've resolved on its own).
+
+### 16.6 Marker colors were backwards: fill/border swapped per direct user correction
+
+- **User correction**: "квадратик... снаружи должен быть белый, а внутри — в цвет линии" — the
+  fixed-in-§16.5 marker (white fill, colored border) had it backwards; wanted white border, filled
+  in the series' own color.
+- **Fix**: swapped `buildPointEmphasis`'s two colors — `itemStyle: { color, borderColor: '#fff',
+  borderWidth: 2 }` (was `{ color: '#fff', borderColor: color }`). No other change — §16.5's z-order
+  fix (halo behind the marker) still applies unchanged, since it was never about which side got
+  which color, only about the halo not being allowed to paint over the marker at all. Verified by
+  re-sampling the same pixel as §16.5's check: now exact `(176, 38, 199)` (Conversions' own color),
+  not white and not a blend.

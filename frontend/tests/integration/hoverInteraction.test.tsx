@@ -142,13 +142,13 @@ describe('hover interaction (tooltip + halo configuration)', () => {
     expect(html).toContain('no data')
   })
 
-  it('turns the hovered point white-bordered on area/spline/line and glows the bar', async () => {
+  it('turns the hovered point white-bordered, color-filled on area/spline/line and glows the bar', async () => {
     const option = await renderAndCaptureOption()
     const [cost, cpa, roi, conversions] = option.series
 
     for (const series of [cost, roi, conversions]) {
-      expect(series.emphasis?.itemStyle?.color).toBe('#fff')
-      expect(series.emphasis?.itemStyle?.borderColor).toBe(series.color)
+      expect(series.emphasis?.itemStyle?.color).toBe(series.color)
+      expect(series.emphasis?.itemStyle?.borderColor).toBe('#fff')
     }
     expect(cpa.emphasis?.itemStyle?.shadowColor).toBe(cpa.color)
   })

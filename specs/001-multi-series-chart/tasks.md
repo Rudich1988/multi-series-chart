@@ -421,7 +421,11 @@ enter/leave, and correct in-bounds positioning near the first/last date.
       `silent`, multiple y-axes, `axisPointer`, animation/`stateAnimation` timing one at a time in
       isolated repros first). Fixed with explicit `z` on both sides: real point-emphasis series get
       `z: 3`, `buildHaloSeries` gets `z: 1`, unconditionally placing the halo behind. Verified the
-      marker center now samples as exact `(255, 255, 255)`.
+      marker center now samples as exact `(255, 255, 255)`. **Third revision** (research.md §16.6,
+      user: "квадратик... снаружи белый, а внутри — в цвет линии") — swapped
+      `buildPointEmphasis`'s two colors: `itemStyle: { color, borderColor: '#fff' }` (was
+      `{ color: '#fff', borderColor: color }`) — white border, fill in the series' own color.
+      §16.5's z-order fix (halo behind the marker) needed no change.
 - [X] T034 [US2] Configure tooltip fade duration (~100–150ms) and in-bounds
       repositioning near the axis edges (FR-008, FR-009) in `buildChartOption.ts` /
       `MultiSeriesChart.tsx` (depends on T032). Both are single `tooltip` option fields, so both

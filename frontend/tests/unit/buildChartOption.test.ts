@@ -141,13 +141,13 @@ describe('buildChartOption', () => {
     expect(series[0].data).toEqual([null, 25.85])
   })
 
-  it('turns the hovered point white with a colored border on area/spline/line, not a tint', () => {
+  it('turns the hovered point into a white-bordered, color-filled marker on area/spline/line', () => {
     const option = buildChartOption(sampleData)
     const [cost, , roi, conversions] = realSeries(option)
 
     for (const series of [cost, roi, conversions]) {
-      expect(series.emphasis?.itemStyle?.color).toBe('#fff')
-      expect(series.emphasis?.itemStyle?.borderColor).toBe(series.color)
+      expect(series.emphasis?.itemStyle?.color).toBe(series.color)
+      expect(series.emphasis?.itemStyle?.borderColor).toBe('#fff')
     }
   })
 
